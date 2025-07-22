@@ -560,6 +560,8 @@ const DashboardScreen = ({ user, profileData }) => {
         }
 
         try {
+            console.log('Sending inquiries to', selectedCompanies.length, 'companies');
+            
             // Create inquiry for each selected insurance company
             for (const { companyId, percentage } of selectedCompanies) {
                 const inquiryData = {
@@ -577,9 +579,13 @@ const DashboardScreen = ({ user, profileData }) => {
                     createdAt: new Date()
                 };
 
+                console.log('Sending inquiry to company:', companyId, 'with data:', inquiryData);
+                
                 // Save inquiry to Firestore
                 const inquiriesRef = collection(db, `artifacts/${appId}/inquiries`);
-                await addDoc(inquiriesRef, inquiryData);
+                const docRef = await addDoc(inquiriesRef, inquiryData);
+                
+                console.log('Inquiry saved with ID:', docRef.id);
             }
 
             alert('Inquiries sent successfully to selected insurance companies!');
@@ -1045,13 +1051,22 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
     useEffect(() => {
         const fetchInquiries = async () => {
             try {
+                console.log('Insurance Company Dashboard: Fetching inquiries for user:', user.uid);
+                console.log('Fetching from path:', `artifacts/${appId}/inquiries`);
+                
                 const inquiriesRef = collection(db, `artifacts/${appId}/inquiries`);
                 const snapshot = await getDocs(inquiriesRef);
+                
+                console.log('Found', snapshot.size, 'total inquiries in database');
                 
                 const companyInquiries = [];
                 snapshot.forEach((doc) => {
                     const data = doc.data();
+                    console.log('Checking inquiry:', doc.id, 'data:', data);
+                    console.log('insuranceCompanyId:', data.insuranceCompanyId, 'vs user.uid:', user.uid);
+                    
                     if (data.insuranceCompanyId === user.uid) {
+                        console.log('Match found! Adding inquiry to list');
                         companyInquiries.push({
                             id: doc.id,
                             ...data
@@ -1066,6 +1081,7 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
                     return dateB - dateA;
                 });
                 
+                console.log('Final result: Found', companyInquiries.length, 'inquiries for this insurance company');
                 setInquiries(companyInquiries);
             } catch (error) {
                 console.error('Error fetching inquiries:', error);
