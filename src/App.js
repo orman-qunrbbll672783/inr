@@ -481,27 +481,46 @@ const DashboardScreen = ({ user, profileData }) => {
     const fetchInsuranceCompanies = async () => {
         setLoadingInsurers(true);
         try {
+            console.log('Fetching insurance companies from path:', `artifacts/${appId}/users`);
+            
             // Query Firestore for all users with role 'Insurance Company'
             const usersRef = collection(db, `artifacts/${appId}/users`);
             const snapshot = await getDocs(usersRef);
             
+            console.log('Found', snapshot.size, 'users in total');
+            
             const companies = [];
             for (const userDoc of snapshot.docs) {
+                console.log('Checking user:', userDoc.id);
+                
                 const profileRef = doc(db, `artifacts/${appId}/users/${userDoc.id}/profile`, 'userProfile');
                 const profileSnap = await getDoc(profileRef);
                 
-                if (profileSnap.exists() && profileSnap.data().role === 'Insurance Company') {
-                    companies.push({
-                        id: userDoc.id,
-                        ...profileSnap.data()
-                    });
+                if (profileSnap.exists()) {
+                    const profileData = profileSnap.data();
+                    console.log('Profile data for', userDoc.id, ':', profileData);
+                    
+                    if (profileData.role === 'Insurance Company') {
+                        console.log('Found insurance company:', profileData.companyName);
+                        companies.push({
+                            id: userDoc.id,
+                            ...profileData
+                        });
+                    }
+                } else {
+                    console.log('No profile found for user:', userDoc.id);
                 }
             }
             
+            console.log('Total insurance companies found:', companies.length);
             setInsuranceCompanies(companies);
+            
+            if (companies.length === 0) {
+                console.log('No insurance companies found. Make sure at least one user has role "Insurance Company"');
+            }
         } catch (error) {
             console.error('Error fetching insurance companies:', error);
-            alert('Error loading insurance companies. Please try again.');
+            alert(`Error loading insurance companies: ${error.message}`);
         } finally {
             setLoadingInsurers(false);
         }
