@@ -29,7 +29,7 @@ const firebaseConfig = {
   measurementId: "G-7C0C1DWZYF"
 };
 
-const appId = 'default-b2b-app';
+const appId = 'b2b-plat'; // Use your actual Firebase project ID
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
