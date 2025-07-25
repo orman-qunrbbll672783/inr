@@ -10,14 +10,16 @@ import {
 } from 'firebase/auth';
 import { 
     getFirestore, 
+    collection, 
     doc, 
     setDoc, 
     getDoc,
-    collection,
     getDocs,
     addDoc,
     onSnapshot,
-    updateDoc
+    updateDoc,
+    query,
+    where
 } from 'firebase/firestore';
 
 // --- Configuration ---
@@ -1075,6 +1077,55 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
         };
     }, [user.uid]);
 
+    const handleRespond = async (inquiry) => {
+        try {
+            const inquiryRef = doc(db, `artifacts/${appId}/inquiries`, inquiry.id);
+            await updateDoc(inquiryRef, {
+                status: 'responded',
+                respondedAt: new Date()
+            });
+
+            // Create notification for leasing company
+            const notificationRef = collection(db, `artifacts/${appId}/users/${inquiry.leasingCompanyId}/notifications`);
+            await addDoc(notificationRef, {
+                message: `Your inquiry to ${inquiry.insuranceCompanyName} has been responded to. They are preparing a detailed quote.`,
+                inquiryId: inquiry.id,
+                timestamp: new Date(),
+                read: false
+            });
+
+            console.log('Inquiry status updated and notification sent.');
+            alert('Your response has been sent. The leasing company will be notified.');
+        } catch (error) {
+            console.error('Error responding to inquiry:', error);
+            alert('Error updating inquiry status. Please try again.');
+        }
+    };
+
+    const handleReject = async (inquiry) => {
+        try {
+            const inquiryRef = doc(db, `artifacts/${appId}/inquiries`, inquiry.id);
+            await updateDoc(inquiryRef, {
+                status: 'rejected',
+                rejectedAt: new Date()
+            });
+
+            // Create notification for leasing company
+            const notificationRef = collection(db, `artifacts/${appId}/users/${inquiry.leasingCompanyId}/notifications`);
+            await addDoc(notificationRef, {
+                message: `Your inquiry to ${inquiry.insuranceCompanyName} has been rejected.`,
+                inquiryId: inquiry.id,
+                timestamp: new Date(),
+                read: false
+            });
+
+            console.log('Inquiry status updated to rejected and notification sent.');
+        } catch (error) {
+            console.error('Error rejecting inquiry:', error);
+            alert('Error updating inquiry status. Please try again.');
+        }
+    };
+
     // Messaging functions
     const fetchMessages = (inquiryId) => {
         const messagesRef = collection(db, `artifacts/${appId}/inquiries/${inquiryId}/messages`);
@@ -1171,37 +1222,9 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
         return true;
     });
 
-    const handleRespond = async (inquiryId) => {
-        try {
-            // Update status in Firestore
-            const inquiryRef = doc(db, `artifacts/${appId}/inquiries`, inquiryId);
-            await updateDoc(inquiryRef, {
-                status: 'responded',
-                respondedAt: new Date()
-            });
-            
-            console.log('Inquiry status updated to responded:', inquiryId);
-        } catch (error) {
-            console.error('Error updating inquiry status:', error);
-            alert('Error updating status. Please try again.');
-        }
-    };
+
     
-    const handleReject = async (inquiryId) => {
-        try {
-            // Update status in Firestore
-            const inquiryRef = doc(db, `artifacts/${appId}/inquiries`, inquiryId);
-            await updateDoc(inquiryRef, {
-                status: 'rejected',
-                rejectedAt: new Date()
-            });
-            
-            console.log('Inquiry status updated to rejected:', inquiryId);
-        } catch (error) {
-            console.error('Error updating inquiry status:', error);
-            alert('Error updating status. Please try again.');
-        }
-    };
+
 
     return (
         <>
@@ -1384,27 +1407,37 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
                                             <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">
                                                 {inquiry.message}
                                             </p>
+
+                                            {/* Vehicle Registration Photos */}
+                                            <div className="mt-4">
+                                                <h4 className="font-medium text-gray-800 mb-2">Vehicle Registration Photos:</h4>
+                                                <div className="flex space-x-4">
+                                                    {inquiry.frontImageURL && (
+                                                        <a href={inquiry.frontImageURL} target="_blank" rel="noopener noreferrer">
+                                                            <img src={inquiry.frontImageURL} alt="Front Side" className="w-32 h-20 object-cover rounded-lg shadow-md hover:shadow-xl transition-shadow" />
+                                                        </a>
+                                                    )}
+                                                    {inquiry.backImageURL && (
+                                                        <a href={inquiry.backImageURL} target="_blank" rel="noopener noreferrer">
+                                                            <img src={inquiry.backImageURL} alt="Back Side" className="w-32 h-20 object-cover rounded-lg shadow-md hover:shadow-xl transition-shadow" />
+                                                        </a>
+                                                    )}
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
-                                    
                                     <div className="flex space-x-3 pt-4 border-t border-gray-100">
                                         {inquiry.status === 'pending' && (
                                             <>
                                                 <button
-                                                    onClick={() => {
-                                                        handleRespond(inquiry.id);
-                                                        alert('Your response has been sent. The leasing company will be notified that you are preparing a detailed quote with pricing.');
-                                                    }}
+                                                    onClick={() => handleRespond(inquiry)}
                                                     className="flex-1 bg-gradient-to-r from-emerald-600 to-green-600 text-white py-2 px-4 rounded-xl font-medium hover:from-emerald-700 hover:to-green-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                                                 >
                                                     Respond to Inquiry
                                                 </button>
                                                 <button 
-                                                    onClick={() => {
-                                                        handleReject(inquiry.id);
-                                                        alert('Inquiry has been rejected.');
-                                                    }}
-                                                    className="px-4 py-2 border border-red-300 text-red-700 rounded-xl hover:bg-red-50 transition-colors"
+                                                    onClick={() => handleReject(inquiry)}
+                                                    className="flex-1 bg-white border border-gray-300 text-gray-800 py-2 px-4 rounded-xl font-medium hover:bg-gray-100 transition-all duration-200"
                                                 >
                                                     Reject
                                                 </button>

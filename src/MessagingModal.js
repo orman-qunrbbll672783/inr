@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
     collection, 
     addDoc, 
@@ -19,19 +19,25 @@ const MessagingModal = ({
     const [messages, setMessages] = useState([]);
     const [newMessage, setNewMessage] = useState('');
     const [loading, setLoading] = useState(false);
+    const messagesEndRef = useRef(null);
 
     // Fetch messages for this inquiry
     useEffect(() => {
-        if (!isOpen || !inquiry) return;
+        if (!isOpen || !inquiry) {
+            console.log('MessagingModal: Not fetching messages - modal closed or no inquiry');
+            return;
+        }
 
+        console.log('MessagingModal: Setting up real-time listener for inquiry:', inquiry.id);
         const messagesRef = collection(db, `artifacts/${appId}/inquiries/${inquiry.id}/messages`);
+        
         const unsubscribe = onSnapshot(messagesRef, (snapshot) => {
+            console.log('MessagingModal: Received messages snapshot, size:', snapshot.size);
             const inquiryMessages = [];
             snapshot.forEach((doc) => {
-                inquiryMessages.push({
-                    id: doc.id,
-                    ...doc.data()
-                });
+                const messageData = { id: doc.id, ...doc.data() };
+                console.log('MessagingModal: Message data:', messageData);
+                inquiryMessages.push(messageData);
             });
             
             // Sort by timestamp
@@ -41,18 +47,36 @@ const MessagingModal = ({
                 return timeA - timeB;
             });
             
+            console.log('MessagingModal: Setting messages:', inquiryMessages.length, 'messages');
             setMessages(inquiryMessages);
             
             // Mark messages as read when viewing
-            markMessagesAsRead();
+            if (inquiryMessages.length > 0) {
+                markMessagesAsRead();
+            }
+        }, (error) => {
+            console.error('MessagingModal: Error fetching messages:', error);
         });
         
-        return () => unsubscribe();
+        return () => {
+            console.log('MessagingModal: Cleaning up message listener');
+            unsubscribe();
+        };
     }, [isOpen, inquiry?.id]);
 
+    useEffect(() => {
+        if (messagesEndRef.current) {
+            messagesEndRef.current.scrollTop = messagesEndRef.current.scrollHeight;
+        }
+    }, [messages]);
+
     const sendMessage = async () => {
-        if (!newMessage.trim() || loading) return;
+        if (!newMessage.trim() || loading) {
+            console.log('SendMessage: Not sending - empty message or already sending');
+            return;
+        }
         
+        console.log('SendMessage: Sending message for inquiry:', inquiry.id);
         setLoading(true);
         try {
             const messageData = {
@@ -64,12 +88,14 @@ const MessagingModal = ({
                 read: false
             };
             
+            console.log('SendMessage: Message data:', messageData);
             const messagesRef = collection(db, `artifacts/${appId}/inquiries/${inquiry.id}/messages`);
             await addDoc(messagesRef, messageData);
             
+            console.log('SendMessage: Message sent successfully');
             setNewMessage('');
         } catch (error) {
-            console.error('Error sending message:', error);
+            console.error('SendMessage: Error sending message:', error);
             alert('Error sending message. Please try again.');
         } finally {
             setLoading(false);
@@ -98,8 +124,8 @@ const MessagingModal = ({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl h-[600px] flex flex-col">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-2 sm:p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg h-[90vh] sm:h-[80vh] md:h-[600px] flex flex-col">
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-gray-200">
                     <div>
@@ -122,7 +148,7 @@ const MessagingModal = ({
                 </div>
                 
                 {/* Messages Area */}
-                <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                <div ref={messagesEndRef} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 scroll-smooth">
                     {messages.length > 0 ? (
                         messages.map((message) => (
                             <div
