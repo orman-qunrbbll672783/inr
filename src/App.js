@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
+import MessagingModal from './MessagingModal';
 import { 
     getAuth, 
     signInWithPopup, 
@@ -282,6 +283,11 @@ const DashboardScreen = ({ user, profileData }) => {
     const [insuranceCompanies, setInsuranceCompanies] = useState([]);
     const [selectedInsurers, setSelectedInsurers] = useState({});
     const [loadingInsurers, setLoadingInsurers] = useState(false);
+    
+    // Messaging state for leasing companies
+    const [showMessaging, setShowMessaging] = useState(false);
+    const [selectedInquiry, setSelectedInquiry] = useState(null);
+    const [sentInquiries, setSentInquiries] = useState([]);
 
     const handleSignOut = async () => {
         try {
@@ -409,6 +415,46 @@ const DashboardScreen = ({ user, profileData }) => {
         setUploadStatus('insurance_selection');
         fetchInsuranceCompanies();
     };
+    
+    // Fetch sent inquiries for messaging
+    const fetchSentInquiries = async () => {
+        try {
+            const inquiriesRef = collection(db, `artifacts/${appId}/inquiries`);
+            const unsubscribe = onSnapshot(inquiriesRef, (snapshot) => {
+                const userInquiries = [];
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    if (data.leasingCompanyId === user.uid) {
+                        userInquiries.push({ id: doc.id, ...data });
+                    }
+                });
+                setSentInquiries(userInquiries);
+            });
+            return unsubscribe;
+        } catch (error) {
+            console.error('Error fetching sent inquiries:', error);
+        }
+    };
+    
+    const openMessaging = (inquiry) => {
+        setSelectedInquiry(inquiry);
+        setShowMessaging(true);
+    };
+    
+    const closeMessaging = () => {
+        setShowMessaging(false);
+        setSelectedInquiry(null);
+    };
+    
+    // Fetch sent inquiries when component mounts
+    useEffect(() => {
+        if (user?.uid) {
+            const unsubscribe = fetchSentInquiries();
+            return () => {
+                if (unsubscribe) unsubscribe();
+            };
+        }
+    }, [user?.uid]);
 
     const handlePercentageChange = (companyId, percentage) => {
         const numPercentage = parseInt(percentage) || 0;
@@ -501,10 +547,47 @@ const DashboardScreen = ({ user, profileData }) => {
                         </p>
                         <button 
                             onClick={handleExploreInsurance}
-                            className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 px-6 rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                            className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-4 rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                         >
                             Explore Insurance Options
                         </button>
+                        {sentInquiries.length > 0 && (
+                            <div className="mt-12">
+                                <h4 className="text-xl font-bold text-gray-900 mb-6">Your Insurance Inquiries</h4>
+                                <div className="space-y-4">
+                                    {sentInquiries.map((inquiry) => (
+                                        <div key={inquiry.id} className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
+                                            <div className="flex items-center justify-between">
+                                                <div>
+                                                    <h5 className="font-semibold text-gray-900">
+                                                        {inquiry.insuranceCompanyName || 'Insurance Company'}
+                                                    </h5>
+                                                    <p className="text-sm text-gray-600">
+                                                        {inquiry.percentage}% Coverage - Status: <span className={`font-medium ${
+                                                            inquiry.status === 'pending' ? 'text-yellow-600' :
+                                                            inquiry.status === 'responded' ? 'text-green-600' :
+                                                            inquiry.status === 'rejected' ? 'text-red-600' : 'text-gray-600'
+                                                        }`}>{inquiry.status}</span>
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 mt-1">
+                                                        Sent: {inquiry.timestamp?.toDate?.()?.toLocaleDateString() || new Date(inquiry.timestamp).toLocaleDateString()}
+                                                    </p>
+                                                </div>
+                                                <button
+                                                    onClick={() => openMessaging(inquiry)}
+                                                    className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                                                >
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                                    </svg>
+                                                    <span>Message</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -915,6 +998,17 @@ const DashboardScreen = ({ user, profileData }) => {
                     </div>
                 </div>
             </main>
+            
+            {/* Messaging Modal */}
+            <MessagingModal
+                isOpen={showMessaging}
+                onClose={closeMessaging}
+                inquiry={selectedInquiry}
+                user={user}
+                profileData={profileData}
+                db={db}
+                appId={appId}
+            />
         </div>
     );
 };
@@ -925,6 +1019,13 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
     const [activeTab, setActiveTab] = useState('inquiries'); // 'inquiries', 'responded', 'archived'
     const [inquiries, setInquiries] = useState([]);
     const [loadingInquiries, setLoadingInquiries] = useState(true);
+    
+    // Messaging state
+    const [selectedInquiry, setSelectedInquiry] = useState(null);
+    const [showMessaging, setShowMessaging] = useState(false);
+    const [messages, setMessages] = useState({});
+    const [newMessage, setNewMessage] = useState('');
+    const [unreadCounts, setUnreadCounts] = useState({});
 
     // Fetch inquiries for this insurance company with real-time updates
     useEffect(() => {
@@ -974,6 +1075,95 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
         };
     }, [user.uid]);
 
+    // Messaging functions
+    const fetchMessages = (inquiryId) => {
+        const messagesRef = collection(db, `artifacts/${appId}/inquiries/${inquiryId}/messages`);
+        const unsubscribe = onSnapshot(messagesRef, (snapshot) => {
+            const inquiryMessages = [];
+            snapshot.forEach((doc) => {
+                inquiryMessages.push({
+                    id: doc.id,
+                    ...doc.data()
+                });
+            });
+            
+            // Sort by timestamp
+            inquiryMessages.sort((a, b) => {
+                const timeA = a.timestamp?.toDate?.() || new Date(a.timestamp);
+                const timeB = b.timestamp?.toDate?.() || new Date(b.timestamp);
+                return timeA - timeB;
+            });
+            
+            setMessages(prev => ({ ...prev, [inquiryId]: inquiryMessages }));
+            
+            // Mark messages as read when viewing
+            if (showMessaging && selectedInquiry?.id === inquiryId) {
+                markMessagesAsRead(inquiryId);
+            }
+        });
+        
+        return unsubscribe;
+    };
+    
+    const sendMessage = async (inquiryId, messageText) => {
+        if (!messageText.trim()) return;
+        
+        try {
+            const messageData = {
+                text: messageText.trim(),
+                senderId: user.uid,
+                senderName: profileData.companyName,
+                senderRole: 'Insurance Company',
+                timestamp: new Date(),
+                read: false
+            };
+            
+            const messagesRef = collection(db, `artifacts/${appId}/inquiries/${inquiryId}/messages`);
+            await addDoc(messagesRef, messageData);
+            
+            setNewMessage('');
+        } catch (error) {
+            console.error('Error sending message:', error);
+            alert('Error sending message. Please try again.');
+        }
+    };
+    
+    const markMessagesAsRead = async (inquiryId) => {
+        try {
+            const messagesRef = collection(db, `artifacts/${appId}/inquiries/${inquiryId}/messages`);
+            const snapshot = await getDocs(messagesRef);
+            
+            const batch = [];
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                if (!data.read && data.senderId !== user.uid) {
+                    batch.push(updateDoc(doc.ref, { read: true }));
+                }
+            });
+            
+            await Promise.all(batch);
+        } catch (error) {
+            console.error('Error marking messages as read:', error);
+        }
+    };
+    
+    const openMessaging = (inquiry) => {
+        setSelectedInquiry(inquiry);
+        setShowMessaging(true);
+        
+        // Fetch messages for this inquiry
+        const unsubscribe = fetchMessages(inquiry.id);
+        
+        // Store unsubscribe function for cleanup
+        return unsubscribe;
+    };
+    
+    const closeMessaging = () => {
+        setShowMessaging(false);
+        setSelectedInquiry(null);
+        setNewMessage('');
+    };
+
     const filteredInquiries = inquiries.filter(inquiry => {
         if (activeTab === 'inquiries') return inquiry.status === 'pending';
         if (activeTab === 'responded') return inquiry.status === 'responded' || inquiry.status === 'rejected';
@@ -1014,6 +1204,7 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
     };
 
     return (
+        <>
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-emerald-50">
             {/* Header */}
             <header className="bg-white/80 backdrop-blur-md border-b border-white/20 sticky top-0 z-50">
@@ -1196,28 +1387,44 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
                                         </div>
                                     </div>
                                     
-                                    {inquiry.status === 'pending' && (
-                                        <div className="flex space-x-3 pt-4 border-t border-gray-100">
-                                            <button
-                                                onClick={() => {
-                                                    handleRespond(inquiry.id);
-                                                    alert('Your response has been sent. The leasing company will be notified that you are preparing a detailed quote with pricing.');
-                                                }}
-                                                className="flex-1 bg-gradient-to-r from-emerald-600 to-green-600 text-white py-2 px-4 rounded-xl font-medium hover:from-emerald-700 hover:to-green-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                                            >
-                                                Respond to Inquiry
-                                            </button>
-                                            <button 
-                                                onClick={() => {
-                                                    handleReject(inquiry.id);
-                                                    alert('Inquiry has been rejected.');
-                                                }}
-                                                className="px-4 py-2 border border-red-300 text-red-700 rounded-xl hover:bg-red-50 transition-colors"
-                                            >
-                                                Reject
-                                            </button>
-                                        </div>
-                                    )}
+                                    <div className="flex space-x-3 pt-4 border-t border-gray-100">
+                                        {inquiry.status === 'pending' && (
+                                            <>
+                                                <button
+                                                    onClick={() => {
+                                                        handleRespond(inquiry.id);
+                                                        alert('Your response has been sent. The leasing company will be notified that you are preparing a detailed quote with pricing.');
+                                                    }}
+                                                    className="flex-1 bg-gradient-to-r from-emerald-600 to-green-600 text-white py-2 px-4 rounded-xl font-medium hover:from-emerald-700 hover:to-green-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                                                >
+                                                    Respond to Inquiry
+                                                </button>
+                                                <button 
+                                                    onClick={() => {
+                                                        handleReject(inquiry.id);
+                                                        alert('Inquiry has been rejected.');
+                                                    }}
+                                                    className="px-4 py-2 border border-red-300 text-red-700 rounded-xl hover:bg-red-50 transition-colors"
+                                                >
+                                                    Reject
+                                                </button>
+                                            </>
+                                        )}
+                                        <button
+                                            onClick={() => openMessaging(inquiry)}
+                                            className="relative px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                                            </svg>
+                                            <span>Message</span>
+                                            {unreadCounts[inquiry.id] > 0 && (
+                                                <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                                                    {unreadCounts[inquiry.id]}
+                                                </span>
+                                            )}
+                                        </button>
+                                    </div>
                                 </div>
                             ))
                         )}
@@ -1225,6 +1432,17 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
                 </div>
             </main>
         </div>
+        
+        <MessagingModal
+            isOpen={showMessaging}
+            onClose={closeMessaging}
+            inquiry={selectedInquiry}
+            user={user}
+            profileData={profileData}
+            db={db}
+            appId={appId}
+        />
+        </>
     );
 };
 
