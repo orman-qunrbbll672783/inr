@@ -291,144 +291,21 @@ const DashboardScreen = ({ user, profileData }) => {
         }
     };
 
-    const validateDocument = (imageData, type) => {
-        return new Promise((resolve) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                canvas.width = img.width;
-                canvas.height = img.height;
-                ctx.drawImage(img, 0, 0);
-                
-                // Get image data for analysis
-                const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const data = imgData.data;
-                
-                // Basic validation - focus on the big picture
-                const validation = {
-                    hasBlueElements: false,
-                    hasLightElements: false, // For back side (beige/cream/light colors)
-                    aspectRatio: img.width / img.height,
-                    isValidSize: img.width > 300 && img.height > 200,
-                    isLandscape: (img.width / img.height) > 1.1
-                };
-                
-                // Sample colors across the image - much more lenient approach
-                let totalSamples = 0;
-                let blueish = 0;
-                let lightish = 0;
-                const sampleRate = 25; // Sample fewer pixels for better performance
-                
-                for (let i = 0; i < data.length; i += sampleRate * 4) {
-                    const r = data[i];
-                    const g = data[i + 1];
-                    const b = data[i + 2];
-                    const alpha = data[i + 3];
-                    
-                    // Skip transparent pixels
-                    if (alpha < 100) continue;
-                    
-                    totalSamples++;
-                    
-                    // Very lenient blue detection (front side)
-                    // Any pixel where blue is notably higher than red/green
-                    if (b > r + 20 && b > g + 10 && b > 80) {
-                        blueish++;
-                    }
-                    
-                    // Very lenient light/beige detection (back side)
-                    // Any pixel that's generally light colored
-                    if ((r + g + b) > 450 || (r > 140 && g > 130 && b > 100)) {
-                        lightish++;
-                    }
-                }
-                
-                // Calculate percentages - much more lenient thresholds
-                if (totalSamples > 0) {
-                    validation.hasBlueElements = (blueish / totalSamples) > 0.03; // Just 3% blue pixels
-                    validation.hasLightElements = (lightish / totalSamples) > 0.25; // 25% light pixels
-                }
-                
-                // Determine document type and validate
-                let isValid = false;
-                let errorMessage = '';
-                let documentSide = 'unknown';
-                
-                // First, determine what side this looks like
-                if (validation.hasBlueElements && !validation.hasLightElements) {
-                    documentSide = 'front';
-                } else if (validation.hasLightElements && !validation.hasBlueElements) {
-                    documentSide = 'back';
-                } else if (validation.hasBlueElements && validation.hasLightElements) {
-                    // Mixed - could be either, lean towards what user is trying to upload
-                    documentSide = type;
-                } else {
-                    documentSide = 'unknown';
-                }
-                
-                // Basic quality checks first
-                if (!validation.isValidSize) {
-                    errorMessage = 'Image quality is too low. Please upload a clearer image.';
-                } else if (!validation.isLandscape) {
-                    errorMessage = 'Please rotate the document to landscape orientation.';
-                } else if (documentSide === 'unknown') {
-                    errorMessage = 'This doesn\'t look like a Technical Registration Passport. Please upload the correct document.';
-                } else if (documentSide !== type) {
-                    // This is the key check - wrong side uploaded to wrong field
-                    if (type === 'front') {
-                        errorMessage = 'You\'re trying to upload the back side to the front section. Please upload the blue registration card here.';
-                    } else {
-                        errorMessage = 'You\'re trying to upload the front side to the back section. Please upload the certificate (lighter colored document) here.';
-                    }
-                } else {
-                    // Everything looks good
-                    isValid = true;
-                }
-                
-                resolve({ 
-                    isValid, 
-                    errorMessage, 
-                    validation, 
-                    detectedSide: documentSide,
-                    expectedSide: type
-                });
-            };
-            
-            img.onerror = () => {
-                resolve({ 
-                    isValid: false, 
-                    errorMessage: 'Unable to process the image. Please try a different image file.',
-                    validation: null,
-                    detectedSide: 'unknown',
-                    expectedSide: type
-                });
-            };
-            
-            img.src = imageData;
-        });
-    };
+
 
     const handleImageUpload = async (file, type) => {
         if (file && file.type.startsWith('image/')) {
             const reader = new FileReader();
-            reader.onload = async (e) => {
+            reader.onload = (e) => {
                 const imageData = e.target.result;
                 
-                // Validate the document
-                const validationResult = await validateDocument(imageData, type);
-                
-                if (validationResult.isValid) {
-                    if (type === 'front') {
-                        setFrontImage(file);
-                        setFrontImagePreview(imageData);
-                    } else {
-                        setBackImage(file);
-                        setBackImagePreview(imageData);
-                    }
+                // No validation - accept any image
+                if (type === 'front') {
+                    setFrontImage(file);
+                    setFrontImagePreview(imageData);
                 } else {
-                    // Show error message
-                    alert(validationResult.errorMessage);
+                    setBackImage(file);
+                    setBackImagePreview(imageData);
                 }
             };
             reader.readAsDataURL(file);
@@ -1099,7 +976,7 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
 
     const filteredInquiries = inquiries.filter(inquiry => {
         if (activeTab === 'inquiries') return inquiry.status === 'pending';
-        if (activeTab === 'responded') return inquiry.status === 'responded';
+        if (activeTab === 'responded') return inquiry.status === 'responded' || inquiry.status === 'rejected';
         if (activeTab === 'archived') return inquiry.status === 'archived';
         return true;
     });
@@ -1322,13 +1199,22 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
                                     {inquiry.status === 'pending' && (
                                         <div className="flex space-x-3 pt-4 border-t border-gray-100">
                                             <button
-                                                onClick={() => handleRespond(inquiry.id)}
+                                                onClick={() => {
+                                                    handleRespond(inquiry.id);
+                                                    alert('Your response has been sent. The leasing company will be notified that you are preparing a detailed quote with pricing.');
+                                                }}
                                                 className="flex-1 bg-gradient-to-r from-emerald-600 to-green-600 text-white py-2 px-4 rounded-xl font-medium hover:from-emerald-700 hover:to-green-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                                             >
-                                                Send Quote
+                                                Respond to Inquiry
                                             </button>
-                                            <button className="px-4 py-2 border border-gray-300 text-gray-700 rounded-xl hover:bg-gray-50 transition-colors">
-                                                View Details
+                                            <button 
+                                                onClick={() => {
+                                                    handleReject(inquiry.id);
+                                                    alert('Inquiry has been rejected.');
+                                                }}
+                                                className="px-4 py-2 border border-red-300 text-red-700 rounded-xl hover:bg-red-50 transition-colors"
+                                            >
+                                                Reject
                                             </button>
                                         </div>
                                     )}
