@@ -14,7 +14,9 @@ import {
     getDoc,
     collection,
     getDocs,
-    addDoc
+    addDoc,
+    onSnapshot,
+    updateDoc
 } from 'firebase/firestore';
 
 // --- Configuration ---
@@ -1047,50 +1049,52 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
     const [inquiries, setInquiries] = useState([]);
     const [loadingInquiries, setLoadingInquiries] = useState(true);
 
-    // Fetch inquiries for this insurance company
+    // Fetch inquiries for this insurance company with real-time updates
     useEffect(() => {
-        const fetchInquiries = async () => {
-            try {
-                console.log('Insurance Company Dashboard: Fetching inquiries for user:', user.uid);
-                console.log('Fetching from path:', `artifacts/${appId}/inquiries`);
+        console.log('Insurance Company Dashboard: Setting up real-time listener for user:', user.uid);
+        console.log('Listening to path:', `artifacts/${appId}/inquiries`);
+        
+        const inquiriesRef = collection(db, `artifacts/${appId}/inquiries`);
+        
+        // Set up real-time listener
+        const unsubscribe = onSnapshot(inquiriesRef, (snapshot) => {
+            console.log('Real-time update: Found', snapshot.size, 'total inquiries in database');
+            
+            const companyInquiries = [];
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                console.log('Checking inquiry:', doc.id, 'data:', data);
+                console.log('insuranceCompanyId:', data.insuranceCompanyId, 'vs user.uid:', user.uid);
                 
-                const inquiriesRef = collection(db, `artifacts/${appId}/inquiries`);
-                const snapshot = await getDocs(inquiriesRef);
-                
-                console.log('Found', snapshot.size, 'total inquiries in database');
-                
-                const companyInquiries = [];
-                snapshot.forEach((doc) => {
-                    const data = doc.data();
-                    console.log('Checking inquiry:', doc.id, 'data:', data);
-                    console.log('insuranceCompanyId:', data.insuranceCompanyId, 'vs user.uid:', user.uid);
-                    
-                    if (data.insuranceCompanyId === user.uid) {
-                        console.log('Match found! Adding inquiry to list');
-                        companyInquiries.push({
-                            id: doc.id,
-                            ...data
-                        });
-                    }
-                });
-                
-                // Sort by creation date (newest first)
-                companyInquiries.sort((a, b) => {
-                    const dateA = a.createdAt?.toDate?.() || new Date(a.createdAt);
-                    const dateB = b.createdAt?.toDate?.() || new Date(b.createdAt);
-                    return dateB - dateA;
-                });
-                
-                console.log('Final result: Found', companyInquiries.length, 'inquiries for this insurance company');
-                setInquiries(companyInquiries);
-            } catch (error) {
-                console.error('Error fetching inquiries:', error);
-            } finally {
-                setLoadingInquiries(false);
-            }
-        };
+                if (data.insuranceCompanyId === user.uid) {
+                    console.log('Match found! Adding inquiry to list');
+                    companyInquiries.push({
+                        id: doc.id,
+                        ...data
+                    });
+                }
+            });
+            
+            // Sort by creation date (newest first)
+            companyInquiries.sort((a, b) => {
+                const dateA = a.createdAt?.toDate?.() || new Date(a.createdAt);
+                const dateB = b.createdAt?.toDate?.() || new Date(b.createdAt);
+                return dateB - dateA;
+            });
+            
+            console.log('Final result: Found', companyInquiries.length, 'inquiries for this insurance company');
+            setInquiries(companyInquiries);
+            setLoadingInquiries(false);
+        }, (error) => {
+            console.error('Error in real-time listener:', error);
+            setLoadingInquiries(false);
+        });
 
-        fetchInquiries();
+        // Cleanup listener on unmount
+        return () => {
+            console.log('Cleaning up real-time listener');
+            unsubscribe();
+        };
     }, [user.uid]);
 
     const filteredInquiries = inquiries.filter(inquiry => {
@@ -1100,12 +1104,36 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
         return true;
     });
 
-    const handleRespond = (inquiryId) => {
-        setInquiries(prev => prev.map(inquiry => 
-            inquiry.id === inquiryId 
-                ? { ...inquiry, status: 'responded' }
-                : inquiry
-        ));
+    const handleRespond = async (inquiryId) => {
+        try {
+            // Update status in Firestore
+            const inquiryRef = doc(db, `artifacts/${appId}/inquiries`, inquiryId);
+            await updateDoc(inquiryRef, {
+                status: 'responded',
+                respondedAt: new Date()
+            });
+            
+            console.log('Inquiry status updated to responded:', inquiryId);
+        } catch (error) {
+            console.error('Error updating inquiry status:', error);
+            alert('Error updating status. Please try again.');
+        }
+    };
+    
+    const handleReject = async (inquiryId) => {
+        try {
+            // Update status in Firestore
+            const inquiryRef = doc(db, `artifacts/${appId}/inquiries`, inquiryId);
+            await updateDoc(inquiryRef, {
+                status: 'rejected',
+                rejectedAt: new Date()
+            });
+            
+            console.log('Inquiry status updated to rejected:', inquiryId);
+        } catch (error) {
+            console.error('Error updating inquiry status:', error);
+            alert('Error updating status. Please try again.');
+        }
     };
 
     return (
