@@ -19,7 +19,8 @@ import {
     onSnapshot,
     updateDoc,
     query,
-    where
+    where,
+    orderBy
 } from 'firebase/firestore';
 
 // --- Configuration ---
@@ -288,8 +289,12 @@ const DashboardScreen = ({ user, profileData }) => {
     
     // Messaging state for leasing companies
     const [showMessaging, setShowMessaging] = useState(false);
-    const [selectedInquiry, setSelectedInquiry] = useState(null);
+    const [showInquiryForm, setShowInquiryForm] = useState(false);
     const [sentInquiries, setSentInquiries] = useState([]);
+    const [selectedInquiry, setSelectedInquiry] = useState(null);
+    const [messages, setMessages] = useState({});
+    const [newMessage, setNewMessage] = useState('');
+
 
     const handleSignOut = async () => {
         try {
@@ -441,12 +446,17 @@ const DashboardScreen = ({ user, profileData }) => {
     const openMessaging = (inquiry) => {
         setSelectedInquiry(inquiry);
         setShowMessaging(true);
+
     };
     
     const closeMessaging = () => {
         setShowMessaging(false);
         setSelectedInquiry(null);
     };
+
+
+
+
     
     // Fetch sent inquiries when component mounts
     useEffect(() => {
@@ -469,6 +479,8 @@ const DashboardScreen = ({ user, profileData }) => {
     const getTotalPercentage = () => {
         return Object.values(selectedInsurers).reduce((sum, percent) => sum + percent, 0);
     };
+
+
 
     const handleSendInquiries = async () => {
         const totalPercentage = getTotalPercentage();
@@ -525,21 +537,24 @@ const DashboardScreen = ({ user, profileData }) => {
         }
     };
 
-    const removeImage = (type) => {
-        if (type === 'front') {
-            setFrontImage(null);
-            setFrontImagePreview(null);
-        } else {
-            setBackImage(null);
-            setBackImagePreview(null);
-        }
-    };
+
 
     if (uploadStatus === 'completed') {
         return (
             <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-                <div className="max-w-sm mx-auto text-center">
-                    <div className="bg-white rounded-2xl shadow-xl p-8 border border-white/20">
+                <div className="max-w-4xl mx-auto">
+                    {showMessaging && selectedInquiry && (
+                        <MessagingModal
+                            isOpen={showMessaging}
+                            onClose={closeMessaging}
+                            inquiry={selectedInquiry}
+                            user={user}
+                            profileData={profileData}
+                            db={db}
+                            appId={appId}
+                        />
+                    )}
+                    <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8 border border-white/20">
                         <div className="w-20 h-20 bg-gradient-to-r from-green-400 to-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg">
                             <CheckIcon className="w-10 h-10 text-white" />
                         </div>
@@ -553,43 +568,57 @@ const DashboardScreen = ({ user, profileData }) => {
                         >
                             Explore Insurance Options
                         </button>
-                        {sentInquiries.length > 0 && (
-                            <div className="mt-12">
-                                <h4 className="text-xl font-bold text-gray-900 mb-6">Your Insurance Inquiries</h4>
+                        {/* Sent Inquiries Section */}
+                        <div className="mt-8">
+                            <h3 className="text-xl font-bold text-gray-800 mb-4">Sent Inquiries</h3>
+                            {sentInquiries.length > 0 ? (
                                 <div className="space-y-4">
-                                    {sentInquiries.map((inquiry) => (
-                                        <div key={inquiry.id} className="bg-white rounded-xl p-6 shadow-md border border-gray-200">
-                                            <div className="flex items-center justify-between">
+                                    {sentInquiries.map(inquiry => (
+                                        <div key={inquiry.id} className="bg-gray-50 rounded-xl p-4 border border-gray-200/80">
+                                            <div className="flex justify-between items-start">
                                                 <div>
-                                                    <h5 className="font-semibold text-gray-900">
-                                                        {inquiry.insuranceCompanyName || 'Insurance Company'}
-                                                    </h5>
-                                                    <p className="text-sm text-gray-600">
-                                                        {inquiry.percentage}% Coverage - Status: <span className={`font-medium ${
-                                                            inquiry.status === 'pending' ? 'text-yellow-600' :
-                                                            inquiry.status === 'responded' ? 'text-green-600' :
-                                                            inquiry.status === 'rejected' ? 'text-red-600' : 'text-gray-600'
-                                                        }`}>{inquiry.status}</span>
-                                                    </p>
+                                                    <p className="font-semibold text-gray-800">Inquiry to: <span className="font-bold text-emerald-700">{inquiry.insuranceCompanyName || 'Insurance Company'}</span></p>
                                                     <p className="text-xs text-gray-500 mt-1">
-                                                        Sent: {inquiry.timestamp?.toDate?.()?.toLocaleDateString() || new Date(inquiry.timestamp).toLocaleDateString()}
+                                                        Status: <span className={`font-medium ${inquiry.status === 'pending' ? 'text-amber-600' : inquiry.status === 'responded' ? 'text-green-600' : 'text-red-600'}`}>{inquiry.status}</span>
                                                     </p>
                                                 </div>
+                                            </div>
+
+                                            {/* Vehicle Photos */}
+                                            {(inquiry.frontImageUrl || inquiry.backImageUrl) && (
+                                                <div className="mt-4 pt-4 border-t border-gray-200">
+                                                    <h4 className="text-sm font-semibold text-gray-800 mb-2">Uploaded Vehicle Photos</h4>
+                                                    <div className="flex space-x-4">
+                                                        {inquiry.frontImageUrl && (
+                                                            <a href={inquiry.frontImageUrl} target="_blank" rel="noopener noreferrer">
+                                                                <img src={inquiry.frontImageUrl} alt="Vehicle Front" className="w-32 h-20 object-cover rounded-lg border border-gray-300 hover:opacity-80 transition-opacity" />
+                                                            </a>
+                                                        )}
+                                                        {inquiry.backImageUrl && (
+                                                            <a href={inquiry.backImageUrl} target="_blank" rel="noopener noreferrer">
+                                                                <img src={inquiry.backImageUrl} alt="Vehicle Back" className="w-32 h-20 object-cover rounded-lg border border-gray-300 hover:opacity-80 transition-opacity" />
+                                                            </a>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            <div className="flex justify-end mt-4">
                                                 <button
                                                     onClick={() => openMessaging(inquiry)}
-                                                    className="px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                                                    className="bg-blue-600 text-white py-1 px-3 rounded-lg hover:bg-blue-700 transition-colors text-sm font-semibold flex items-center space-x-2"
                                                 >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                                                    </svg>
-                                                    <span>Message</span>
+                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                                                    <span>Messages</span>
                                                 </button>
                                             </div>
                                         </div>
                                     ))}
                                 </div>
-                            </div>
-                        )}
+                            ) : (
+                                <p className="text-gray-500 text-center py-8">No inquiries sent yet.</p>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -677,47 +706,34 @@ const DashboardScreen = ({ user, profileData }) => {
                                     {insuranceCompanies.map((company) => (
                                         <div key={company.id} className="border border-gray-200 rounded-xl p-4 hover:shadow-md transition-all duration-200">
                                             <div className="flex items-center justify-between">
-                                                <div className="flex items-center space-x-4">
-                                                    <div className="w-12 h-12 bg-gradient-to-r from-emerald-400 to-emerald-600 rounded-xl flex items-center justify-center">
-                                                        <span className="text-white font-bold text-lg">
-                                                            {company.companyName?.charAt(0) || 'I'}
-                                                        </span>
-                                                    </div>
-                                                    <div>
-                                                        <h3 className="font-semibold text-gray-900">{company.companyName}</h3>
-                                                        <p className="text-sm text-gray-500">Insurance Company</p>
-                                                    </div>
+                                                <div>
+                                                    <h3 className="font-semibold text-gray-900">{company.companyName}</h3>
+                                                    <p className="text-sm text-gray-600">{company.email}</p>
                                                 </div>
                                                 <div className="flex items-center space-x-3">
                                                     <input
                                                         type="number"
                                                         min="0"
                                                         max="100"
-                                                        placeholder="%"
-                                                        value={selectedInsurers[company.id] || ''}
+                                                        value={selectedInsurers[company.id] || 0}
                                                         onChange={(e) => handlePercentageChange(company.id, e.target.value)}
-                                                        className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-center focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                        className="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                        placeholder="%"
                                                     />
-                                                    <span className="text-gray-500 font-medium">%</span>
+                                                    <span className="text-gray-500">%</span>
                                                 </div>
                                             </div>
                                         </div>
                                     ))}
                                 </div>
 
-                                {/* Action Buttons */}
-                                <div className="flex space-x-4">
-                                    <button 
-                                        onClick={() => setUploadStatus('completed')}
-                                        className="flex-1 bg-gray-100 text-gray-700 py-4 px-6 rounded-xl font-semibold hover:bg-gray-200 transition-all duration-200"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button 
+                                {/* Send Inquiries Button */}
+                                <div className="text-center">
+                                    <button
                                         onClick={handleSendInquiries}
-                                        disabled={getTotalPercentage() !== 100 || Object.keys(selectedInsurers).length === 0}
-                                        className={`flex-1 py-4 px-6 rounded-xl font-semibold transition-all duration-200 ${
-                                            getTotalPercentage() === 100 && Object.keys(selectedInsurers).length > 0
+                                        disabled={getTotalPercentage() !== 100}
+                                        className={`px-8 py-4 rounded-xl font-semibold transition-all duration-200 ${
+                                            getTotalPercentage() === 100
                                                 ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5'
                                                 : 'bg-gray-300 text-gray-500 cursor-not-allowed'
                                         }`}
@@ -1227,7 +1243,6 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
 
 
     return (
-        <>
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-emerald-50">
             {/* Header */}
             <header className="bg-white/80 backdrop-blur-md border-b border-white/20 sticky top-0 z-50">
@@ -1276,206 +1291,144 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
             </header>
 
             {/* Main Content */}
-            <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-                {/* Welcome Section */}
-                <div className="text-center mb-8">
-                    <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-3">
-                        Welcome, {profileData.companyName}
-                    </h2>
-                    <p className="text-gray-600 text-lg">
-                        Manage inquiries from leasing companies
-                    </p>
-                </div>
+            <div className="bg-white/80 backdrop-blur-sm rounded-3xl shadow-xl border border-white/20 p-6 sm:p-8">
+    {/* Tabs */}
+    <div className="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-xl">
+        <button
+            onClick={() => setActiveTab('inquiries')}
+            className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+                activeTab === 'inquiries'
+                    ? 'bg-white text-emerald-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+            }`}
+        >
+            New Inquiries ({inquiries.filter(i => i.status === 'pending').length})
+        </button>
+        <button
+            onClick={() => setActiveTab('responded')}
+            className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
+                activeTab === 'responded'
+                    ? 'bg-white text-emerald-600 shadow-sm'
+                    : 'text-gray-600 hover:text-gray-900'
+            }`}
+        >
+            Responded ({inquiries.filter(i => i.status === 'responded').length})
+        </button>
+    </div>
 
-                {/* Stats Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                    <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm font-medium text-gray-600">New Inquiries</p>
-                                <p className="text-3xl font-bold text-emerald-600">{inquiries.filter(i => i.status === 'pending').length}</p>
-                            </div>
-                            <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center">
-                                <svg className="w-6 h-6 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                </svg>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm font-medium text-gray-600">Responded</p>
-                                <p className="text-3xl font-bold text-blue-600">{inquiries.filter(i => i.status === 'responded').length}</p>
-                            </div>
-                            <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
-                                <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                </svg>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div className="bg-white/80 backdrop-blur-sm rounded-2xl p-6 border border-white/20 shadow-lg">
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <p className="text-sm font-medium text-gray-600">Total Inquiries</p>
-                                <p className="text-3xl font-bold text-gray-700">{inquiries.length}</p>
-                            </div>
-                            <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center">
-                                <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                                </svg>
-                            </div>
-                        </div>
-                    </div>
+    {/* Inquiries List */}
+    <div className="space-y-4">
+        {loadingInquiries ? (
+            <div className="text-center py-12">
+                <div className="w-8 h-8 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                <p className="text-gray-600">Loading inquiries...</p>
+            </div>
+        ) : filteredInquiries.length === 0 ? (
+            <div className="text-center py-12">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
                 </div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No inquiries yet</h3>
+                <p className="text-gray-500">New inquiries from leasing companies will appear here.</p>
+            </div>
+        ) : (
+            filteredInquiries.map((inquiry) => (
+                <div key={inquiry.id} className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 flex flex-col">
+                    {/* Main Content */}
+                    <div className="flex-grow">
+                        <div className="flex-1">
+                            <div className="flex items-center space-x-3 mb-2">
+                                <h3 className="text-lg font-semibold text-gray-900">{inquiry.leasingCompanyName}</h3>
+                                <span className="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded-lg">{inquiry.percentage}%</span>
+                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                    inquiry.status === 'pending' 
+                                        ? 'bg-yellow-100 text-yellow-800'
+                                        : inquiry.status === 'responded'
+                                        ? 'bg-green-100 text-green-800'
+                                        : 'bg-gray-100 text-gray-800'
+                                }`}>
+                                    {inquiry.status === 'pending' ? 'New' : inquiry.status === 'responded' ? 'Responded' : 'Archived'}
+                                </span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-gray-600 mb-3">
+                                <div><span className="font-medium">Client:</span> {inquiry.clientName}</div>
+                                <div><span className="font-medium">Vehicle:</span> {inquiry.vehicleInfo}</div>
+                                <div><span className="font-medium">Date:</span> {inquiry.requestDate}</div>
+                            </div>
+                            <p className="text-gray-700 bg-gray-50 p-3 rounded-lg mb-4">{inquiry.message}</p>
+                            
+                            {/* Vehicle Registration Photos (Displayed ONCE) */}
+                            <h4 className="font-medium text-gray-800 mb-2">Vehicle Registration Photos:</h4>
+                            <div className="flex space-x-4">
+                                {inquiry.frontImageUrl && (
+                                    <a href={inquiry.frontImageUrl} target="_blank" rel="noopener noreferrer">
+                                        <img src={inquiry.frontImageUrl} alt="Front Side" className="w-32 h-20 object-cover rounded-lg shadow-md hover:shadow-xl transition-shadow" />
+                                    </a>
+                                )}
+                                {inquiry.backImageUrl && (
+                                    <a href={inquiry.backImageUrl} target="_blank" rel="noopener noreferrer">
+                                        <img src={inquiry.backImageUrl} alt="Back Side" className="w-32 h-20 object-cover rounded-lg shadow-md hover:shadow-xl transition-shadow" />
+                                    </a>
+                                )}
+                            </div>
+                        </div>
+                    </div>
 
-                {/* Inquiries Section */}
-                <div className="bg-white/80 backdrop-blur-sm rounded-3xl shadow-xl border border-white/20 p-6 sm:p-8">
-                    {/* Tabs */}
-                    <div className="flex space-x-1 mb-6 bg-gray-100 p-1 rounded-xl">
+                    {/* --- Unified Footer Actions --- */}
+                    <div className="flex justify-between items-center mt-6 pt-4 border-t border-gray-200">
+                        {/* Left Side: Conditional Buttons */}
+                        <div className="flex space-x-3">
+                            {inquiry.status === 'pending' && (
+                                <>
+                                    <button
+                                        onClick={() => handleRespond(inquiry)}
+                                        className="flex-1 bg-gradient-to-r from-emerald-600 to-green-600 text-white py-2 px-4 rounded-xl font-medium hover:from-emerald-700 hover:to-green-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                                    >
+                                        Respond to Inquiry
+                                    </button>
+                                    <button 
+                                        onClick={() => handleReject(inquiry)}
+                                        className="flex-1 bg-white border border-gray-300 text-gray-800 py-2 px-4 rounded-xl font-medium hover:bg-gray-100 transition-all duration-200"
+                                    >
+                                        Reject
+                                    </button>
+                                </>
+                            )}
+                        </div>
+
+                        {/* Right Side: Messages Button */}
                         <button
-                            onClick={() => setActiveTab('inquiries')}
-                            className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
-                                activeTab === 'inquiries'
-                                    ? 'bg-white text-emerald-600 shadow-sm'
-                                    : 'text-gray-600 hover:text-gray-900'
-                            }`}
+                            onClick={() => openMessaging(inquiry)}
+                            className="relative px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors flex items-center space-x-2 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
                         >
-                            New Inquiries ({inquiries.filter(i => i.status === 'pending').length})
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
+                            <span>Messages</span>
+                            {unreadCounts[inquiry.id] > 0 && (
+                                <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                                    {unreadCounts[inquiry.id]}
+                                </span>
+                            )}
                         </button>
-                        <button
-                            onClick={() => setActiveTab('responded')}
-                            className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all duration-200 ${
-                                activeTab === 'responded'
-                                    ? 'bg-white text-emerald-600 shadow-sm'
-                                    : 'text-gray-600 hover:text-gray-900'
-                            }`}
-                        >
-                            Responded ({inquiries.filter(i => i.status === 'responded').length})
-                        </button>
-                    </div>
-
-                    {/* Inquiries List */}
-                    <div className="space-y-4">
-                        {loadingInquiries ? (
-                            <div className="text-center py-12">
-                                <div className="w-8 h-8 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                                <p className="text-gray-600">Loading inquiries...</p>
-                            </div>
-                        ) : filteredInquiries.length === 0 ? (
-                            <div className="text-center py-12">
-                                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                                    <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 4.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                    </svg>
-                                </div>
-                                <h3 className="text-lg font-medium text-gray-900 mb-2">No inquiries yet</h3>
-                                <p className="text-gray-500">New inquiries from leasing companies will appear here.</p>
-                            </div>
-                        ) : (
-                            filteredInquiries.map((inquiry) => (
-                                <div key={inquiry.id} className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200">
-                                    <div className="flex justify-between items-start mb-4">
-                                        <div className="flex-1">
-                                            <div className="flex items-center space-x-3 mb-2">
-                                                <h3 className="text-lg font-semibold text-gray-900">{inquiry.leasingCompanyName}</h3>
-                                                <span className="text-sm bg-blue-100 text-blue-800 px-2 py-1 rounded-lg">{inquiry.percentage}%</span>
-                                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                                                    inquiry.status === 'pending' 
-                                                        ? 'bg-yellow-100 text-yellow-800'
-                                                        : inquiry.status === 'responded'
-                                                        ? 'bg-green-100 text-green-800'
-                                                        : 'bg-gray-100 text-gray-800'
-                                                }`}>
-                                                    {inquiry.status === 'pending' ? 'New' : inquiry.status === 'responded' ? 'Responded' : 'Archived'}
-                                                </span>
-                                            </div>
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm text-gray-600 mb-3">
-                                                <div>
-                                                    <span className="font-medium">Client:</span> {inquiry.clientName}
-                                                </div>
-                                                <div>
-                                                    <span className="font-medium">Vehicle:</span> {inquiry.vehicleInfo}
-                                                </div>
-                                                <div>
-                                                    <span className="font-medium">Date:</span> {inquiry.requestDate}
-                                                </div>
-                                            </div>
-                                            <p className="text-gray-700 bg-gray-50 p-3 rounded-lg">
-                                                {inquiry.message}
-                                            </p>
-
-                                            {/* Vehicle Registration Photos */}
-                                            <div className="mt-4">
-                                                <h4 className="font-medium text-gray-800 mb-2">Vehicle Registration Photos:</h4>
-                                                <div className="flex space-x-4">
-                                                    {inquiry.frontImageURL && (
-                                                        <a href={inquiry.frontImageURL} target="_blank" rel="noopener noreferrer">
-                                                            <img src={inquiry.frontImageURL} alt="Front Side" className="w-32 h-20 object-cover rounded-lg shadow-md hover:shadow-xl transition-shadow" />
-                                                        </a>
-                                                    )}
-                                                    {inquiry.backImageURL && (
-                                                        <a href={inquiry.backImageURL} target="_blank" rel="noopener noreferrer">
-                                                            <img src={inquiry.backImageURL} alt="Back Side" className="w-32 h-20 object-cover rounded-lg shadow-md hover:shadow-xl transition-shadow" />
-                                                        </a>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="flex space-x-3 pt-4 border-t border-gray-100">
-                                        {inquiry.status === 'pending' && (
-                                            <>
-                                                <button
-                                                    onClick={() => handleRespond(inquiry)}
-                                                    className="flex-1 bg-gradient-to-r from-emerald-600 to-green-600 text-white py-2 px-4 rounded-xl font-medium hover:from-emerald-700 hover:to-green-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                                                >
-                                                    Respond to Inquiry
-                                                </button>
-                                                <button 
-                                                    onClick={() => handleReject(inquiry)}
-                                                    className="flex-1 bg-white border border-gray-300 text-gray-800 py-2 px-4 rounded-xl font-medium hover:bg-gray-100 transition-all duration-200"
-                                                >
-                                                    Reject
-                                                </button>
-                                            </>
-                                        )}
-                                        <button
-                                            onClick={() => openMessaging(inquiry)}
-                                            className="relative px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors flex items-center space-x-2"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                                            </svg>
-                                            <span>Message</span>
-                                            {unreadCounts[inquiry.id] > 0 && (
-                                                <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
-                                                    {unreadCounts[inquiry.id]}
-                                                </span>
-                                            )}
-                                        </button>
-                                    </div>
-                                </div>
-                            ))
-                        )}
                     </div>
                 </div>
-            </main>
+            ))
+        )}
+    </div>
+</div>
+            
+            {/* Messaging Modal */}
+            <MessagingModal
+                isOpen={showMessaging}
+                onClose={closeMessaging}
+                inquiry={selectedInquiry}
+                user={user}
+                profileData={profileData}
+                db={db}
+                appId={appId}
+            />
         </div>
-        
-        <MessagingModal
-            isOpen={showMessaging}
-            onClose={closeMessaging}
-            inquiry={selectedInquiry}
-            user={user}
-            profileData={profileData}
-            db={db}
-            appId={appId}
-        />
-        </>
     );
 };
 
