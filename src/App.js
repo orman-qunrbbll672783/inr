@@ -424,24 +424,27 @@ const DashboardScreen = ({ user, profileData }) => {
     };
     
     // Fetch sent inquiries for messaging
-    const fetchSentInquiries = async () => {
-        try {
-            const inquiriesRef = collection(db, `artifacts/${appId}/inquiries`);
-            const unsubscribe = onSnapshot(inquiriesRef, (snapshot) => {
-                const userInquiries = [];
-                snapshot.forEach((doc) => {
-                    const data = doc.data();
-                    if (data.leasingCompanyId === user.uid) {
-                        userInquiries.push({ id: doc.id, ...data });
-                    }
-                });
-                setSentInquiries(userInquiries);
+// AFTER (Correct)
+const fetchSentInquiries = () => { // Removed 'async'
+    try {
+        const inquiriesRef = collection(db, `artifacts/${appId}/inquiries`);
+        const unsubscribe = onSnapshot(inquiriesRef, (snapshot) => {
+            const userInquiries = [];
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                if (data.leasingCompanyId === user.uid) {
+                    userInquiries.push({ id: doc.id, ...data });
+                }
             });
-            return unsubscribe;
-        } catch (error) {
-            console.error('Error fetching sent inquiries:', error);
-        }
-    };
+            setSentInquiries(userInquiries);
+        });
+        return unsubscribe;
+    } catch (error) {
+        console.error('Error fetching sent inquiries:', error);
+        return () => {}; // Return an empty function on error to prevent crashes
+    }
+};
+
     
     const openMessaging = (inquiry) => {
         setSelectedInquiry(inquiry);
