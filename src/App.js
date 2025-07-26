@@ -286,6 +286,7 @@ const DashboardScreen = ({ user, profileData }) => {
     const [insuranceCompanies, setInsuranceCompanies] = useState([]);
     const [selectedInsurers, setSelectedInsurers] = useState({});
     const [loadingInsurers, setLoadingInsurers] = useState(false);
+   
     
     // Messaging state for leasing companies
     const [showMessaging, setShowMessaging] = useState(false);
@@ -295,6 +296,15 @@ const DashboardScreen = ({ user, profileData }) => {
     const [messages, setMessages] = useState({});
     const [newMessage, setNewMessage] = useState('');
 
+    const removeImage = (type) => {
+        if (type === 'front') {
+            setFrontImage(null);
+            setFrontImagePreview(null);
+        } else if (type === 'back') {
+            setBackImage(null);
+            setBackImagePreview(null);
+        }
+    };
 
     const handleSignOut = async () => {
         try {
