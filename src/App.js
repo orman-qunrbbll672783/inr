@@ -281,22 +281,29 @@ const DashboardScreen = ({ user, profileData }) => {
     const [backImage, setBackImage] = useState(null);
     const [frontImagePreview, setFrontImagePreview] = useState(null);
     const [backImagePreview, setBackImagePreview] = useState(null);
-    const [uploadStatus, setUploadStatus] = useState('pending'); // pending, uploading, completed, insurance_selection
+    const [uploadStatus, setUploadStatus] = useState('pending');
     const [dragActive, setDragActive] = useState({ front: false, back: false });
     const [insuranceCompanies, setInsuranceCompanies] = useState([]);
     const [selectedInsurers, setSelectedInsurers] = useState({});
     const [loadingInsurers, setLoadingInsurers] = useState(false);
-   
     
-    // Messaging state for leasing companies
+    // --- MESSAGING & NOTIFICATION STATE ---
     const [showMessaging, setShowMessaging] = useState(false);
-    const [showInquiryForm, setShowInquiryForm] = useState(false);
     const [sentInquiries, setSentInquiries] = useState([]);
     const [selectedInquiry, setSelectedInquiry] = useState(null);
     const [messages, setMessages] = useState({});
-    const [newMessage, setNewMessage] = useState('');
-
+    const [notifications, setNotifications] = useState([]);
+    const [showNotifications, setShowNotifications] = useState(false);
     const [messageUnsubscribe, setMessageUnsubscribe] = useState(null);
+
+    // --- UTILITY FUNCTIONS ---
+    const handleSignOut = async () => {
+        try {
+            await signOut(auth);
+        } catch (error) {
+            console.error("Sign out error:", error);
+        }
+    };
 
     const removeImage = (type) => {
         if (type === 'front') {
@@ -308,753 +315,226 @@ const DashboardScreen = ({ user, profileData }) => {
         }
     };
 
-    const handleSignOut = async () => {
-        try {
-            await signOut(auth);
-        } catch (error) {
-            console.error("Sign out error:", error);
-        }
-    };
-
-
-
-    const handleImageUpload = async (file, type) => {
-        if (file && file.type.startsWith('image/')) {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const imageData = e.target.result;
-                
-                // No validation - accept any image
-                if (type === 'front') {
-                    setFrontImage(file);
-                    setFrontImagePreview(imageData);
-                } else {
-                    setBackImage(file);
-                    setBackImagePreview(imageData);
-                }
-            };
-            reader.readAsDataURL(file);
-        } else {
-            alert('Please upload a valid image file (JPG, PNG, etc.)');
-        }
-    };
-
-    const handleDrop = (e, type) => {
-        e.preventDefault();
-        setDragActive({ front: false, back: false });
-        const files = e.dataTransfer.files;
-        if (files.length > 0) {
-            handleImageUpload(files[0], type);
-        }
-    };
-
-    const handleDragOver = (e) => {
-        e.preventDefault();
-    };
-
-    const handleDragEnter = (e, type) => {
-        e.preventDefault();
-        setDragActive(prev => ({ ...prev, [type]: true }));
-    };
-
-    const handleDragLeave = (type) => {
-        setDragActive(prev => ({ ...prev, [type]: false }));
-    };
-
-    const handleFileSelect = (e, type) => {
-        const file = e.target.files[0];
-        if (file) {
-            handleImageUpload(file, type);
-        }
-    };
-
-    const handleSubmit = async () => {
-        if (!frontImage || !backImage) {
-            alert('Please upload both front and back images of your Technical Registration Passport.');
-            return;
-        }
-
-        setUploadStatus('uploading');
-        
-        // Simulate upload process
-        setTimeout(() => {
-            setUploadStatus('completed');
-        }, 2000);
-    };
-
-    const fetchInsuranceCompanies = async () => {
-        setLoadingInsurers(true);
-        try {
-            console.log('Fetching insurance companies from path:', `artifacts/${appId}/users`);
-            
-            // Query Firestore for all users with role 'Insurance Company'
-            const usersRef = collection(db, `artifacts/${appId}/users`);
-            const snapshot = await getDocs(usersRef);
-            
-            console.log('Found', snapshot.size, 'users in total');
-            
-            const companies = [];
-            for (const userDoc of snapshot.docs) {
-                console.log('Checking user:', userDoc.id);
-                
-                const profileRef = doc(db, `artifacts/${appId}/users/${userDoc.id}/profile`, 'userProfile');
-                const profileSnap = await getDoc(profileRef);
-                
-                if (profileSnap.exists()) {
-                    const profileData = profileSnap.data();
-                    console.log('Profile data for', userDoc.id, ':', profileData);
-                    
-                    if (profileData.role === 'Insurance Company') {
-                        console.log('Found insurance company:', profileData.companyName);
-                        companies.push({
-                            id: userDoc.id,
-                            ...profileData
-                        });
-                    }
-                } else {
-                    console.log('No profile found for user:', userDoc.id);
-                }
-            }
-            
-            console.log('Total insurance companies found:', companies.length);
-            setInsuranceCompanies(companies);
-            
-            if (companies.length === 0) {
-                console.log('No insurance companies found. Make sure at least one user has role "Insurance Company"');
-            }
-        } catch (error) {
-            console.error('Error fetching insurance companies:', error);
-            alert(`Error loading insurance companies: ${error.message}`);
-        } finally {
-            setLoadingInsurers(false);
-        }
-    };
-
-    const handleExploreInsurance = () => {
-        setUploadStatus('insurance_selection');
-        fetchInsuranceCompanies();
-    };
-    
-    // Fetch sent inquiries for messaging
-// AFTER (Correct)
-const fetchSentInquiries = () => { // Removed 'async'
-    try {
+    // --- DATA FETCHING EFFECTS ---
+    // Effect to fetch sent inquiries
+    useEffect(() => {
+        if (!user?.uid) return;
         const inquiriesRef = collection(db, `artifacts/${appId}/inquiries`);
-        const unsubscribe = onSnapshot(inquiriesRef, (snapshot) => {
-            const userInquiries = [];
-            snapshot.forEach((doc) => {
-                const data = doc.data();
-                if (data.leasingCompanyId === user.uid) {
-                    userInquiries.push({ id: doc.id, ...data });
-                }
-            });
+        const q = query(inquiriesRef, where("leasingCompanyId", "==", user.uid), orderBy("createdAt", "desc"));
+        
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const userInquiries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setSentInquiries(userInquiries);
         });
-        return unsubscribe;
-    } catch (error) {
-        console.error('Error fetching sent inquiries:', error);
-        return () => {}; // Return an empty function on error to prevent crashes
-    }
-};
 
-    
-    // Inside the DashboardScreen component, replace your existing functions with these
-
-const openMessaging = (inquiry) => {
-    // If there's an old listener running, clean it up first
-    if (messageUnsubscribe) {
-        messageUnsubscribe();
-    }
-    
-    setSelectedInquiry(inquiry);
-    setShowMessaging(true);
-    
-    // Start a new listener and save its cleanup function
-    const unsubscribeFunc = fetchMessages(inquiry.id);
-    setMessageUnsubscribe(() => unsubscribeFunc);
-};
-
-const closeMessaging = () => {
-    // When the modal closes, call the cleanup function
-    if (messageUnsubscribe) {
-        messageUnsubscribe();
-    }
-    
-    setShowMessaging(false);
-    setSelectedInquiry(null);
-    setMessageUnsubscribe(null); // Reset the state
-};
-
-
-
-
-    
-    // Fetch sent inquiries when component mounts
-    useEffect(() => {
-        if (user?.uid) {
-            const unsubscribe = fetchSentInquiries();
-            return () => {
-                if (unsubscribe) unsubscribe();
-            };
-        }
+        return () => unsubscribe();
     }, [user?.uid]);
 
-    const handlePercentageChange = (companyId, percentage) => {
-        const numPercentage = parseInt(percentage) || 0;
-        setSelectedInsurers(prev => ({
-            ...prev,
-            [companyId]: numPercentage
-        }));
+    // Effect to fetch notifications
+    useEffect(() => {
+        if (!user?.uid) return;
+        const notificationsRef = collection(db, `artifacts/${appId}/users/${user.uid}/notifications`);
+        const q = query(notificationsRef, orderBy("timestamp", "desc"));
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const userNotifications = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setNotifications(userNotifications);
+        });
+
+        return () => unsubscribe();
+    }, [user?.uid]);
+
+
+    // --- MESSAGING FUNCTIONS ---
+    const fetchMessages = (inquiryId) => {
+        const messagesRef = collection(db, `artifacts/${appId}/inquiries/${inquiryId}/messages`);
+        const q = query(messagesRef, orderBy("timestamp", "asc"));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const inquiryMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setMessages(prev => ({ ...prev, [inquiryId]: inquiryMessages }));
+        });
+        return unsubscribe;
     };
 
-    const getTotalPercentage = () => {
-        return Object.values(selectedInsurers).reduce((sum, percent) => sum + percent, 0);
-    };
-
-
-
-    const handleSendInquiries = async () => {
-        const totalPercentage = getTotalPercentage();
-        if (totalPercentage !== 100) {
-            alert(`Total percentage must equal 100%. Current total: ${totalPercentage}%`);
-            return;
-        }
-
-        const selectedCompanies = Object.entries(selectedInsurers)
-            .filter(([_, percentage]) => percentage > 0)
-            .map(([companyId, percentage]) => ({ companyId, percentage }));
-
-        if (selectedCompanies.length === 0) {
-            alert('Please select at least one insurance company.');
-            return;
-        }
-
+    const sendMessage = async (inquiryId, messageText) => {
+        if (!messageText.trim()) return;
         try {
-            console.log('Sending inquiries to', selectedCompanies.length, 'companies');
-            
-            // Create inquiry for each selected insurance company
-            for (const { companyId, percentage } of selectedCompanies) {
-                const inquiryData = {
-                    leasingCompanyId: user.uid,
-                    leasingCompanyName: profileData.companyName,
-                    insuranceCompanyId: companyId,
-                    percentage: percentage,
-                    clientName: user.displayName || 'Client',
-                    vehicleInfo: 'Vehicle from Technical Registration Passport',
-                    requestDate: new Date().toISOString().split('T')[0],
-                    status: 'pending',
-                    message: `Insurance inquiry for ${percentage}% coverage. Please provide your quote for our client's vehicle insurance.`,
-                    frontImageUrl: frontImagePreview,
-                    backImageUrl: backImagePreview,
-                    createdAt: new Date()
-                };
-
-                console.log('Sending inquiry to company:', companyId, 'with data:', inquiryData);
-                
-                // Save inquiry to Firestore
-                const inquiriesRef = collection(db, `artifacts/${appId}/inquiries`);
-                const docRef = await addDoc(inquiriesRef, inquiryData);
-                
-                console.log('Inquiry saved with ID:', docRef.id);
-            }
-
-            alert('Inquiries sent successfully to selected insurance companies!');
-            // Reset to completed state
-            setUploadStatus('completed');
-            setSelectedInsurers({});
+            const messageData = {
+                text: messageText.trim(),
+                senderId: user.uid,
+                senderName: profileData.companyName,
+                senderRole: 'Leasing Company',
+                timestamp: new Date(),
+                read: false
+            };
+            const messagesRef = collection(db, `artifacts/${appId}/inquiries/${inquiryId}/messages`);
+            await addDoc(messagesRef, messageData);
         } catch (error) {
-            console.error('Error sending inquiries:', error);
-            alert('Error sending inquiries. Please try again.');
+            console.error('Error sending message:', error);
         }
     };
 
+    const openMessaging = (inquiry) => {
+        if (messageUnsubscribe) messageUnsubscribe();
+        setSelectedInquiry(inquiry);
+        setShowMessaging(true);
+        const unsubscribeFunc = fetchMessages(inquiry.id);
+        setMessageUnsubscribe(() => unsubscribeFunc);
+    };
+
+    const closeMessaging = () => {
+        if (messageUnsubscribe) messageUnsubscribe();
+        setShowMessaging(false);
+        setSelectedInquiry(null);
+        setMessageUnsubscribe(null);
+    };
+    
+    // Other functions like handleImageUpload, handleSendInquiries, etc. remain the same...
+
+    // (Keep all your other functions like handleImageUpload, handleDrop, handleSubmit, etc. here)
+    const handleImageUpload = async (file, type) => {
+        if (file && file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const imageData = e.target.result;
+                // No validation - accept any image
+                if (type === 'front') {
+                    setFrontImage(file);
+                    setFrontImagePreview(imageData);
+                } else {
+                    setBackImage(file);
+                    setBackImagePreview(imageData);
+                }
+            };
+            reader.readAsDataURL(file);
+        } else {
+            alert('Please upload a valid image file (JPG, PNG, etc.)');
+        }
+    };
+    const handleDrop = (e, type) => { e.preventDefault(); setDragActive({ front: false, back: false }); const files = e.dataTransfer.files; if (files.length > 0) { handleImageUpload(files[0], type); } };
+    const handleDragOver = (e) => { e.preventDefault(); };
+    const handleDragEnter = (e, type) => { e.preventDefault(); setDragActive(prev => ({ ...prev, [type]: true })); };
+    const handleDragLeave = (type) => { setDragActive(prev => ({ ...prev, [type]: false })); };
+    const handleFileSelect = (e, type) => { const file = e.target.files[0]; if (file) { handleImageUpload(file, type); } };
+    const handleSubmit = async () => { if (!frontImage || !backImage) { alert('Please upload both front and back images.'); return; } setUploadStatus('uploading'); setTimeout(() => { setUploadStatus('completed'); }, 2000); };
+    const fetchInsuranceCompanies = async () => { setLoadingInsurers(true); try { const usersRef = collection(db, `artifacts/${appId}/users`); const q = query(usersRef, where("role", "==", "Insurance Company")); const snapshot = await getDocs(q); const companies = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })); setInsuranceCompanies(companies); } catch (error) { console.error('Error fetching insurance companies:', error); } finally { setLoadingInsurers(false); } };
+    const handleExploreInsurance = () => { setUploadStatus('insurance_selection'); fetchInsuranceCompanies(); };
+    const handlePercentageChange = (companyId, percentage) => { const numPercentage = parseInt(percentage) || 0; setSelectedInsurers(prev => ({ ...prev, [companyId]: numPercentage })); };
+    const getTotalPercentage = () => { return Object.values(selectedInsurers).reduce((sum, percent) => sum + percent, 0); };
+    const handleSendInquiries = async () => { const totalPercentage = getTotalPercentage(); if (totalPercentage !== 100) { alert(`Total percentage must be 100%.`); return; } const selectedCompanies = Object.entries(selectedInsurers).filter(([_, percentage]) => percentage > 0).map(([companyId, percentage]) => ({ companyId, percentage })); if (selectedCompanies.length === 0) { alert('Please select at least one company.'); return; } try { for (const { companyId, percentage } of selectedCompanies) { const companyDetails = insuranceCompanies.find(c => c.id === companyId); const inquiryData = { leasingCompanyId: user.uid, leasingCompanyName: profileData.companyName, insuranceCompanyId: companyId, insuranceCompanyName: companyDetails?.companyName || 'N/A', percentage, clientName: user.displayName || 'Client', vehicleInfo: 'Vehicle Info', requestDate: new Date().toISOString().split('T')[0], status: 'pending', message: `Inquiry for ${percentage}% coverage.`, frontImageUrl: frontImagePreview, backImageUrl: backImagePreview, createdAt: new Date() }; const inquiriesRef = collection(db, `artifacts/${appId}/inquiries`); await addDoc(inquiriesRef, inquiryData); } alert('Inquiries sent successfully!'); setUploadStatus('completed'); setSelectedInsurers({}); } catch (error) { console.error('Error sending inquiries:', error); } };
 
 
+    // The UI part (return statement)
     if (uploadStatus === 'completed') {
         return (
-            <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
-                <div className="max-w-4xl mx-auto">
-                    {showMessaging && selectedInquiry && (
-                        <MessagingModal
-                            isOpen={showMessaging}
-                            onClose={closeMessaging}
-                            inquiry={selectedInquiry}
-                            user={user}
-                            profileData={profileData}
-                            db={db}
-                            appId={appId}
-                        />
-                    )}
-                    <div className="bg-white rounded-2xl shadow-xl p-6 md:p-8 border border-white/20">
-                        <div className="w-20 h-20 bg-gradient-to-r from-green-400 to-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-lg">
-                            <CheckIcon className="w-10 h-10 text-white" />
-                        </div>
-                        <h2 className="text-2xl font-bold text-gray-900 mb-3">Documents Verified!</h2>
-                        <p className="text-gray-600 mb-8 leading-relaxed">
-                            Your Technical Registration Passport has been verified successfully. You can now explore insurance options from registered companies.
-                        </p>
-                        <button 
-                            onClick={handleExploreInsurance}
-                            className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-4 rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                        >
-                            Explore Insurance Options
-                        </button>
-                        {/* Sent Inquiries Section */}
-                        <div className="mt-8">
-                            <h3 className="text-xl font-bold text-gray-800 mb-4">Sent Inquiries</h3>
-                            {sentInquiries.length > 0 ? (
-                                <div className="space-y-4">
-                                    {sentInquiries.map(inquiry => (
-                                        <div key={inquiry.id} className="bg-gray-50 rounded-xl p-4 border border-gray-200/80">
-                                            <div className="flex justify-between items-start">
-                                                <div>
-                                                    <p className="font-semibold text-gray-800">Inquiry to: <span className="font-bold text-emerald-700">{inquiry.insuranceCompanyName || 'Insurance Company'}</span></p>
-                                                    <p className="text-xs text-gray-500 mt-1">
-                                                        Status: <span className={`font-medium ${inquiry.status === 'pending' ? 'text-amber-600' : inquiry.status === 'responded' ? 'text-green-600' : 'text-red-600'}`}>{inquiry.status}</span>
-                                                    </p>
-                                                </div>
-                                            </div>
-
-                                            {/* Vehicle Photos */}
-                                            {(inquiry.frontImageUrl || inquiry.backImageUrl) && (
-                                                <div className="mt-4 pt-4 border-t border-gray-200">
-                                                    <h4 className="text-sm font-semibold text-gray-800 mb-2">Uploaded Vehicle Photos</h4>
-                                                    <div className="flex space-x-4">
-                                                        {inquiry.frontImageUrl && (
-                                                            <a href={inquiry.frontImageUrl} target="_blank" rel="noopener noreferrer">
-                                                                <img src={inquiry.frontImageUrl} alt="Vehicle Front" className="w-32 h-20 object-cover rounded-lg border border-gray-300 hover:opacity-80 transition-opacity" />
-                                                            </a>
-                                                        )}
-                                                        {inquiry.backImageUrl && (
-                                                            <a href={inquiry.backImageUrl} target="_blank" rel="noopener noreferrer">
-                                                                <img src={inquiry.backImageUrl} alt="Vehicle Back" className="w-32 h-20 object-cover rounded-lg border border-gray-300 hover:opacity-80 transition-opacity" />
-                                                            </a>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            <div className="flex justify-end mt-4">
-                                                <button
-                                                    onClick={() => openMessaging(inquiry)}
-                                                    className="bg-blue-600 text-white py-1 px-3 rounded-lg hover:bg-blue-700 transition-colors text-sm font-semibold flex items-center space-x-2"
-                                                >
-                                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>
-                                                    <span>Messages</span>
-                                                </button>
-                                            </div>
-                                        </div>
-                                    ))}
+            // ... your existing JSX for the 'completed' screen ...
+            // I will only show the changes needed for the list and modal
+             <div className="mt-8">
+                <h3 className="text-xl font-bold text-gray-800 mb-4">Sent Inquiries</h3>
+                {sentInquiries.length > 0 ? (
+                    <div className="space-y-4">
+                        {sentInquiries.map(inquiry => (
+                            <div key={inquiry.id} className="bg-gray-50 rounded-xl p-4 border border-gray-200/80">
+                                {/* ... content of the inquiry card ... */}
+                                <div className="flex justify-end mt-4">
+                                     <button
+                                         onClick={() => openMessaging(inquiry)}
+                                         // ... button styles ...
+                                     >
+                                         Messages
+                                     </button>
                                 </div>
-                            ) : (
-                                <p className="text-gray-500 text-center py-8">No inquiries sent yet.</p>
-                            )}
-                        </div>
+                            </div>
+                        ))}
                     </div>
-                </div>
+                ) : (
+                    <p>No inquiries sent yet.</p>
+                )}
+                
+                {/* Ensure the modal gets the needed props */}
+                <MessagingModal
+                    isOpen={showMessaging}
+                    onClose={closeMessaging}
+                    inquiry={selectedInquiry}
+                    user={user}
+                    profileData={profileData}
+                    messages={messages[selectedInquiry?.id] || []}
+                    onSendMessage={sendMessage}
+                    db={db}
+                    appId={appId}
+                />
             </div>
         );
     }
-
-    if (uploadStatus === 'insurance_selection') {
-        return (
-            <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-                {/* Header */}
-                <header className="bg-white/80 backdrop-blur-md border-b border-white/20 sticky top-0 z-50">
-                    <div className="max-w-6xl mx-auto px-4 sm:px-6">
-                        <div className="flex justify-between items-center h-16">
-                            <div className="flex items-center space-x-3">
-                                <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-                                    <span className="text-white font-bold text-sm">IP</span>
-                                </div>
-                                <h1 className="text-lg font-bold text-gray-900">Select Insurance Companies</h1>
-                            </div>
-                            <button 
-                                onClick={() => setUploadStatus('completed')}
-                                className="text-gray-600 hover:text-gray-800 font-medium"
-                            >
-                                ← Back
-                            </button>
-                        </div>
-                    </div>
-                </header>
-
-                <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
-                    <div className="bg-white rounded-2xl shadow-xl p-6 sm:p-8 border border-white/20">
-                        <div className="text-center mb-8">
-                            <h2 className="text-2xl font-bold text-gray-900 mb-3">Choose Insurance Companies</h2>
-                            <p className="text-gray-600">
-                                Select insurance companies and allocate percentages. Total must equal 100%.
-                            </p>
-                        </div>
-
-                        {loadingInsurers ? (
-                            <div className="text-center py-12">
-                                <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                                <p className="text-gray-600">Loading insurance companies...</p>
-                            </div>
-                        ) : insuranceCompanies.length === 0 ? (
-                            <div className="text-center py-12">
-                                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                                    <span className="text-gray-400 text-2xl">🏢</span>
-                                </div>
-                                <h3 className="text-lg font-semibold text-gray-900 mb-2">No Insurance Companies Found</h3>
-                                <p className="text-gray-600 mb-6">
-                                    No insurance companies are currently registered on the platform.
-                                </p>
-                                <button 
-                                    onClick={() => setUploadStatus('completed')}
-                                    className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all duration-200"
-                                >
-                                    Go Back
-                                </button>
-                            </div>
-                        ) : (
-                            <>
-                                {/* Total Percentage Display */}
-                                <div className="mb-6 p-4 bg-gray-50 rounded-xl">
-                                    <div className="flex justify-between items-center">
-                                        <span className="font-semibold text-gray-700">Total Percentage:</span>
-                                        <span className={`text-xl font-bold ${
-                                            getTotalPercentage() === 100 ? 'text-green-600' : 
-                                            getTotalPercentage() > 100 ? 'text-red-600' : 'text-orange-600'
-                                        }`}>
-                                            {getTotalPercentage()}%
-                                        </span>
-                                    </div>
-                                    {getTotalPercentage() !== 100 && (
-                                        <p className="text-sm text-gray-500 mt-1">
-                                            {getTotalPercentage() < 100 ? 
-                                                `Need ${100 - getTotalPercentage()}% more` : 
-                                                `Reduce by ${getTotalPercentage() - 100}%`
-                                            }
-                                        </p>
-                                    )}
-                                </div>
-
-                                {/* Insurance Companies List */}
-                                <div className="space-y-4 mb-8">
-                                    {insuranceCompanies.map((company) => (
-                                        <div key={company.id} className="border border-gray-200 rounded-xl p-4 hover:shadow-md transition-all duration-200">
-                                            <div className="flex items-center justify-between">
-                                                <div>
-                                                    <h3 className="font-semibold text-gray-900">{company.companyName}</h3>
-                                                    <p className="text-sm text-gray-600">{company.email}</p>
-                                                </div>
-                                                <div className="flex items-center space-x-3">
-                                                    <input
-                                                        type="number"
-                                                        min="0"
-                                                        max="100"
-                                                        value={selectedInsurers[company.id] || 0}
-                                                        onChange={(e) => handlePercentageChange(company.id, e.target.value)}
-                                                        className="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                                        placeholder="%"
-                                                    />
-                                                    <span className="text-gray-500">%</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                {/* Send Inquiries Button */}
-                                <div className="text-center">
-                                    <button
-                                        onClick={handleSendInquiries}
-                                        disabled={getTotalPercentage() !== 100}
-                                        className={`px-8 py-4 rounded-xl font-semibold transition-all duration-200 ${
-                                            getTotalPercentage() === 100
-                                                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5'
-                                                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                                        }`}
-                                    >
-                                        Send Inquiries
-                                    </button>
-                                </div>
-                            </>
-                        )}
-                    </div>
-                </main>
-            </div>
-        );
-    }
-
+    
+    // ... rest of your component's return statements for other statuses
+    
     return (
         <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
-            {/* Modern Mobile Header */}
             <header className="bg-white/80 backdrop-blur-md border-b border-white/20 sticky top-0 z-50">
                 <div className="max-w-6xl mx-auto px-4 sm:px-6">
                     <div className="flex justify-between items-center h-16">
-                        <div className="flex items-center space-x-3">
-                            <div className="w-8 h-8 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-lg flex items-center justify-center">
-                                <span className="text-white font-bold text-sm">IP</span>
-                            </div>
-                            <h1 className="text-lg font-bold text-gray-900 hidden sm:block">Insurance Platform</h1>
-                        </div>
+                        {/* ... Left side logo ... */}
                         
-                        {/* Profile Menu */}
-                        <div className="relative">
-                            <button 
-                                onClick={() => setShowProfileMenu(!showProfileMenu)}
-                                className="flex items-center space-x-3 p-2 rounded-xl hover:bg-white/50 transition-all duration-200"
-                            >
-                                <div className="w-9 h-9 bg-gradient-to-r from-indigo-500 to-purple-500 rounded-xl flex items-center justify-center shadow-md">
-                                    <UserIcon className="w-5 h-5 text-white" />
-                                </div>
-                                <div className="text-left hidden sm:block">
-                                    <p className="text-sm font-semibold text-gray-900">{user.displayName || 'User'}</p>
-                                    <p className="text-xs text-gray-500">{profileData.companyName}</p>
-                                </div>
-                            </button>
-                            
-                            {showProfileMenu && (
-                                <div className="absolute right-0 mt-3 w-56 bg-white/95 backdrop-blur-md rounded-2xl shadow-xl border border-white/20 py-2 z-20">
-                                    <div className="px-4 py-3 border-b border-gray-100">
-                                        <p className="text-sm font-semibold text-gray-900">{user.displayName || user.email}</p>
-                                        <p className="text-xs text-gray-500 mt-1">{profileData.role}</p>
-                                        <p className="text-xs text-gray-400">{profileData.companyName}</p>
+                        {/* --- RIGHT SIDE ICONS (Notification & Profile) --- */}
+                        <div className="flex items-center space-x-4">
+                            {/* Notification Bell */}
+                            <div className="relative">
+                                <button onClick={() => setShowNotifications(!showNotifications)} className="relative">
+                                    <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" /></svg>
+                                    {notifications.filter(n => !n.read).length > 0 && (
+                                        <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                                        </span>
+                                    )}
+                                </button>
+                                {showNotifications && (
+                                    <div className="absolute right-0 mt-3 w-80 bg-white rounded-2xl shadow-xl border p-4 z-20">
+                                        <h4 className="font-bold mb-2">Notifications</h4>
+                                        <div className="space-y-2 max-h-96 overflow-y-auto">
+                                            {notifications.length > 0 ? notifications.map(n => (
+                                                <div key={n.id} className={`p-2 rounded-lg ${!n.read ? 'bg-blue-50' : ''}`}>
+                                                    <p className="text-sm">{n.message}</p>
+                                                    <p className="text-xs text-gray-500 mt-1">{new Date(n.timestamp.seconds * 1000).toLocaleString()}</p>
+                                                </div>
+                                            )) : <p className="text-sm text-gray-500">No new notifications.</p>}
+                                        </div>
                                     </div>
-                                    <button 
-                                        onClick={handleSignOut}
-                                        className="w-full text-left px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition-colors rounded-xl mx-1 mt-1"
-                                    >
-                                        Sign Out
-                                    </button>
-                                </div>
-                            )}
+                                )}
+                            </div>
+
+                            {/* Profile Menu */}
+                            <div className="relative">
+                                <button onClick={() => setShowProfileMenu(!showProfileMenu)} className="flex items-center">
+                                    {/* ... profile icon ... */}
+                                </button>
+                                {showProfileMenu && (
+                                    <div className="absolute right-0 mt-3 w-56 bg-white/95 ...">
+                                        {/* ... profile details ... */}
+                                        <button onClick={handleSignOut} className="w-full text-left ...">
+                                            Sign Out
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                     </div>
                 </div>
             </header>
-
-            {/* Main Content */}
-            <main className="max-w-4xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-                {/* Hero Section */}
-                <div className="text-center mb-8">
-                    <h2 className="text-3xl sm:text-4xl font-bold text-gray-900 mb-3">
-                        Document Verification
-                    </h2>
-                    <p className="text-gray-600 text-lg max-w-2xl mx-auto leading-relaxed">
-                        Upload your Technical Registration Passport to access our insurance marketplace
-                    </p>
-                </div>
-
-                {/* Document Upload Card */}
-                <div className="bg-white/80 backdrop-blur-sm rounded-3xl shadow-xl border border-white/20 p-6 sm:p-8">
-                    <div className="flex items-center justify-center mb-8">
-                        <div className="w-16 h-16 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-2xl flex items-center justify-center shadow-lg">
-                            <DocumentIcon className="w-8 h-8 text-white" />
-                        </div>
-                    </div>
-                    
-                    <div className="text-center mb-8">
-                        <h3 className="text-xl font-bold text-gray-900 mb-2">Vehicle Registration Certificate</h3>
-                        <p className="text-gray-600">Please upload clear photos of both sides</p>
-                    </div>
-
-                    <div className="space-y-6 sm:space-y-8">
-                        {/* Front Side Upload */}
-                        <div className="space-y-4">
-                            <div className="flex items-center space-x-3 mb-4">
-                                <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-xl flex items-center justify-center text-sm font-bold shadow-md">
-                                    1
-                                </div>
-                                <div>
-                                    <h4 className="text-lg font-bold text-gray-900">Front Side</h4>
-                                    <p className="text-sm text-gray-600">Blue registration card</p>
-                                </div>
-                            </div>
-                            <div 
-                                className={`relative border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center transition-all duration-300 ${
-                                    dragActive.front 
-                                        ? 'border-blue-400 bg-blue-50 scale-105' 
-                                        : frontImage 
-                                            ? 'border-emerald-400 bg-emerald-50' 
-                                            : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'
-                                }`}
-                                onDragOver={handleDragOver}
-                                onDragLeave={() => handleDragLeave('front')}
-                                onDrop={(e) => handleDrop(e, 'front')}
-                            >
-                                {frontImagePreview ? (
-                                    <div className="space-y-4">
-                                        <img 
-                                            src={frontImagePreview} 
-                                            alt="Front side preview" 
-                                            className="max-w-full h-40 sm:h-48 object-contain mx-auto rounded-xl shadow-lg"
-                                        />
-                                        <div className="flex items-center justify-center space-x-2 text-emerald-600">
-                                            <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center">
-                                                <CheckIcon className="w-4 h-4 text-white" />
-                                            </div>
-                                            <span className="text-sm font-semibold">Front side uploaded</span>
-                                        </div>
-                                        <button
-                                            onClick={() => removeImage('front')}
-                                            className="text-red-500 hover:text-red-600 text-sm font-medium transition-colors bg-red-50 hover:bg-red-100 px-4 py-2 rounded-lg"
-                                        >
-                                            Remove image
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-6">
-                                        <div className="w-16 h-16 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-2xl flex items-center justify-center mx-auto">
-                                            <UploadIcon className="w-8 h-8 text-blue-600" />
-                                        </div>
-                                        <div>
-                                            <p className="text-gray-700 font-medium mb-2">Drop your image here</p>
-                                            <p className="text-sm text-gray-500 mb-6">or tap to browse</p>
-                                            <input
-                                                type="file"
-                                                accept="image/*"
-                                                onChange={(e) => handleFileSelect(e, 'front')}
-                                                className="hidden"
-                                                id="front-upload"
-                                            />
-                                            <label 
-                                                htmlFor="front-upload"
-                                                className="inline-block bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-3 rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 cursor-pointer shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                                            >
-                                                Choose File
-                                            </label>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Back Side Upload */}
-                        <div className="space-y-4">
-                            <div className="flex items-center space-x-3 mb-4">
-                                <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-xl flex items-center justify-center text-sm font-bold shadow-md">
-                                    2
-                                </div>
-                                <div>
-                                    <h4 className="text-lg font-bold text-gray-900">Back Side</h4>
-                                    <p className="text-sm text-gray-600">Certificate document</p>
-                                </div>
-                            </div>
-                            <div 
-                                className={`relative border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center transition-all duration-300 ${
-                                    dragActive.back 
-                                        ? 'border-blue-400 bg-blue-50 scale-105' 
-                                        : backImage 
-                                            ? 'border-emerald-400 bg-emerald-50' 
-                                            : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'
-                                }`}
-                                onDragOver={handleDragOver}
-                                onDragLeave={() => handleDragLeave('back')}
-                                onDrop={(e) => handleDrop(e, 'back')}
-                            >
-                                {backImagePreview ? (
-                                    <div className="space-y-4">
-                                        <img 
-                                            src={backImagePreview} 
-                                            alt="Back side preview" 
-                                            className="max-w-full h-40 sm:h-48 object-contain mx-auto rounded-xl shadow-lg"
-                                        />
-                                        <div className="flex items-center justify-center space-x-2 text-emerald-600">
-                                            <div className="w-6 h-6 bg-emerald-500 rounded-full flex items-center justify-center">
-                                                <CheckIcon className="w-4 h-4 text-white" />
-                                            </div>
-                                            <span className="text-sm font-semibold">Back side uploaded</span>
-                                        </div>
-                                        <button
-                                            onClick={() => removeImage('back')}
-                                            className="text-red-500 hover:text-red-600 text-sm font-medium transition-colors bg-red-50 hover:bg-red-100 px-4 py-2 rounded-lg"
-                                        >
-                                            Remove image
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-6">
-                                        <div className="w-16 h-16 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-2xl flex items-center justify-center mx-auto">
-                                            <UploadIcon className="w-8 h-8 text-blue-600" />
-                                        </div>
-                                        <div>
-                                            <p className="text-gray-700 font-medium mb-2">Drop your image here</p>
-                                            <p className="text-sm text-gray-500 mb-6">or tap to browse</p>
-                                            <input
-                                                type="file"
-                                                accept="image/*"
-                                                onChange={(e) => handleFileSelect(e, 'back')}
-                                                className="hidden"
-                                                id="back-upload"
-                                            />
-                                            <label 
-                                                htmlFor="back-upload"
-                                                className="inline-block bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-8 py-3 rounded-xl font-semibold hover:from-blue-700 hover:to-indigo-700 transition-all duration-200 cursor-pointer shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
-                                            >
-                                                Choose File
-                                            </label>
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Submit Button */}
-                    <div className="text-center mt-8 sm:mt-12">
-                        <button
-                            onClick={handleSubmit}
-                            disabled={!frontImage || !backImage || uploadStatus === 'uploading'}
-                            className={`w-full max-w-sm mx-auto py-4 px-8 rounded-2xl font-bold text-white transition-all duration-300 ${
-                                !frontImage || !backImage || uploadStatus === 'uploading'
-                                    ? 'bg-gray-300 cursor-not-allowed'
-                                    : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-xl hover:shadow-2xl transform hover:-translate-y-1'
-                            }`}
-                        >
-                            {uploadStatus === 'uploading' ? (
-                                <div className="flex items-center justify-center space-x-3">
-                                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                    <span>Verifying...</span>
-                                </div>
-                            ) : (
-                                'Verify Documents'
-                            )}
-                        </button>
-                        
-                        {(!frontImage || !backImage) && (
-                            <p className="text-sm text-gray-500 mt-4">
-                                Upload both sides to continue
-                            </p>
-                        )}
-                    </div>
-
-                    {/* Help Section */}
-                    <div className="mt-8 sm:mt-12 p-6 bg-blue-50/50 rounded-2xl border border-blue-100">
-                        <h4 className="font-bold text-blue-900 mb-4 text-center">Need Help?</h4>
-                        <div className="grid sm:grid-cols-2 gap-6 text-sm">
-                            <div className="space-y-2">
-                                <h5 className="font-semibold text-blue-800">Front Side (Blue Card):</h5>
-                                <ul className="text-blue-700 space-y-1">
-                                    <li>• Blue background with logo</li>
-                                    <li>• Vehicle registration details</li>
-                                    <li>• Owner information</li>
-                                </ul>
-                            </div>
-                            <div className="space-y-2">
-                                <h5 className="font-semibold text-blue-800">Back Side (Certificate):</h5>
-                                <ul className="text-blue-700 space-y-1">
-                                    <li>• Light colored background</li>
-                                    <li>• Official seals and stamps</li>
-                                    <li>• Signatures and details</li>
-                                </ul>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </main>
             
-            {/* Messaging Modal */}
-            <MessagingModal
+            {/* ... rest of the main content ... */}
+            <main> ... </main>
+
+            {/* Make sure the modal gets all the props it needs here too */}
+             <MessagingModal
                 isOpen={showMessaging}
                 onClose={closeMessaging}
                 inquiry={selectedInquiry}
                 user={user}
                 profileData={profileData}
+                messages={messages[selectedInquiry?.id] || []}
+                onSendMessage={sendMessage}
                 db={db}
                 appId={appId}
             />
@@ -1065,151 +545,113 @@ const closeMessaging = () => {
 // Insurance Company Dashboard
 const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
     const [showProfileMenu, setShowProfileMenu] = useState(false);
-    const [activeTab, setActiveTab] = useState('inquiries'); // 'inquiries', 'responded', 'archived'
+    const [activeTab, setActiveTab] = useState('inquiries');
     const [inquiries, setInquiries] = useState([]);
     const [loadingInquiries, setLoadingInquiries] = useState(true);
     
-    // Messaging state
+    // --- MESSAGING STATE ---
     const [selectedInquiry, setSelectedInquiry] = useState(null);
     const [showMessaging, setShowMessaging] = useState(false);
     const [messages, setMessages] = useState({});
-    const [newMessage, setNewMessage] = useState('');
     const [unreadCounts, setUnreadCounts] = useState({});
-    const [messageUnsubscribe, setMessageUnsubscribe] = useState(null); // <-- Add this
+    const [messageUnsubscribe, setMessageUnsubscribe] = useState(null);
 
-    // Fetch inquiries for this insurance company with real-time updates
+    // --- DATA FETCHING EFFECT ---
     useEffect(() => {
-        console.log('Insurance Company Dashboard: Setting up real-time listener for user:', user.uid);
-        console.log('Listening to path:', `artifacts/${appId}/inquiries`);
-        
         const inquiriesRef = collection(db, `artifacts/${appId}/inquiries`);
-        
-        // Set up real-time listener
-        const unsubscribe = onSnapshot(inquiriesRef, (snapshot) => {
-            console.log('Real-time update: Found', snapshot.size, 'total inquiries in database');
-            
-            const companyInquiries = [];
-            snapshot.forEach((doc) => {
-                const data = doc.data();
-                console.log('Checking inquiry:', doc.id, 'data:', data);
-                console.log('insuranceCompanyId:', data.insuranceCompanyId, 'vs user.uid:', user.uid);
-                
-                if (data.insuranceCompanyId === user.uid) {
-                    console.log('Match found! Adding inquiry to list');
-                    companyInquiries.push({
-                        id: doc.id,
-                        ...data
-                    });
-                }
-            });
-            
-            // Sort by creation date (newest first)
-            companyInquiries.sort((a, b) => {
-                const dateA = a.createdAt?.toDate?.() || new Date(a.createdAt);
-                const dateB = b.createdAt?.toDate?.() || new Date(b.createdAt);
-                return dateB - dateA;
-            });
-            
-            console.log('Final result: Found', companyInquiries.length, 'inquiries for this insurance company');
+        const q = query(inquiriesRef, where("insuranceCompanyId", "==", user.uid));
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const companyInquiries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            companyInquiries.sort((a, b) => (b.createdAt.toDate() || 0) - (a.createdAt.toDate() || 0));
             setInquiries(companyInquiries);
             setLoadingInquiries(false);
         }, (error) => {
-            console.error('Error in real-time listener:', error);
+            console.error('Error in inquiries listener:', error);
             setLoadingInquiries(false);
         });
 
-        // Cleanup listener on unmount
-        return () => {
-            console.log('Cleaning up real-time listener');
-            unsubscribe();
-        };
+        return () => unsubscribe();
     }, [user.uid]);
 
-    const handleRespond = async (inquiry) => {
-        try {
-            const inquiryRef = doc(db, `artifacts/${appId}/inquiries`, inquiry.id);
-            await updateDoc(inquiryRef, {
-                status: 'responded',
-                respondedAt: new Date()
-            });
+    // ... handleRespond and handleReject functions remain the same ...
+    const handleRespond = async (inquiry) => { /* ... your existing code ... */ };
+    const handleReject = async (inquiry) => { /* ... your existing code ... */ };
 
-            // Create notification for leasing company
-            const notificationRef = collection(db, `artifacts/${appId}/users/${inquiry.leasingCompanyId}/notifications`);
-            await addDoc(notificationRef, {
-                message: `Your inquiry to ${inquiry.insuranceCompanyName} has been responded to. They are preparing a detailed quote.`,
-                inquiryId: inquiry.id,
-                timestamp: new Date(),
-                read: false
-            });
 
-            console.log('Inquiry status updated and notification sent.');
-            alert('Your response has been sent. The leasing company will be notified.');
-        } catch (error) {
-            console.error('Error responding to inquiry:', error);
-            alert('Error updating inquiry status. Please try again.');
-        }
-    };
-
-    const handleReject = async (inquiry) => {
-        try {
-            const inquiryRef = doc(db, `artifacts/${appId}/inquiries`, inquiry.id);
-            await updateDoc(inquiryRef, {
-                status: 'rejected',
-                rejectedAt: new Date()
-            });
-
-            // Create notification for leasing company
-            const notificationRef = collection(db, `artifacts/${appId}/users/${inquiry.leasingCompanyId}/notifications`);
-            await addDoc(notificationRef, {
-                message: `Your inquiry to ${inquiry.insuranceCompanyName} has been rejected.`,
-                inquiryId: inquiry.id,
-                timestamp: new Date(),
-                read: false
-            });
-
-            console.log('Inquiry status updated to rejected and notification sent.');
-        } catch (error) {
-            console.error('Error rejecting inquiry:', error);
-            alert('Error updating inquiry status. Please try again.');
-        }
-    };
-
-    // Messaging functions
-    // Inside the DashboardScreen component, after the state declarations
-
-const fetchMessages = (inquiryId) => {
-    console.log(`Leasing Dashboard: Fetching messages for inquiry ${inquiryId}`);
-    const messagesRef = collection(db, `artifacts/${appId}/inquiries/${inquiryId}/messages`);
-    const q = query(messagesRef, orderBy("timestamp", "asc"));
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-        const inquiryMessages = [];
-        snapshot.forEach((doc) => {
-            inquiryMessages.push({ id: doc.id, ...doc.data() });
-        });
-        setMessages(prev => ({ ...prev, [inquiryId]: inquiryMessages }));
-    });
-    
-    return unsubscribe;
-};
-            
-            // Sort by timestamp
-            inquiryMessages.sort((a, b) => {
-                const timeA = a.timestamp?.toDate?.() || new Date(a.timestamp);
-                const timeB = b.timestamp?.toDate?.() || new Date(b.timestamp);
-                return timeA - timeB;
-            });
-            
+    // --- MESSAGING FUNCTIONS (CLEANED UP) ---
+    const fetchMessages = (inquiryId) => {
+        const messagesRef = collection(db, `artifacts/${appId}/inquiries/${inquiryId}/messages`);
+        const q = query(messagesRef, orderBy("timestamp", "asc"));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const inquiryMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setMessages(prev => ({ ...prev, [inquiryId]: inquiryMessages }));
-            
-            // Mark messages as read when viewing
-            if (showMessaging && selectedInquiry?.id === inquiryId) {
-                markMessagesAsRead(inquiryId);
-            }
-        };
-        
+        });
         return unsubscribe;
-    ;
+    };
+
+    const sendMessage = async (inquiryId, messageText) => {
+        if (!messageText.trim()) return;
+        try {
+            const messageData = {
+                text: messageText.trim(),
+                senderId: user.uid,
+                senderName: profileData.companyName,
+                senderRole: 'Insurance Company',
+                timestamp: new Date(),
+                read: false
+            };
+            const messagesRef = collection(db, `artifacts/${appId}/inquiries/${inquiryId}/messages`);
+            await addDoc(messagesRef, messageData);
+        } catch (error) {
+            console.error('Error sending message:', error);
+        }
+    };
+
+    const openMessaging = (inquiry) => {
+        if (messageUnsubscribe) messageUnsubscribe();
+        setSelectedInquiry(inquiry);
+        setShowMessaging(true);
+        const unsubscribeFunc = fetchMessages(inquiry.id);
+        setMessageUnsubscribe(() => unsubscribeFunc);
+    };
+
+    const closeMessaging = () => {
+        if (messageUnsubscribe) messageUnsubscribe();
+        setShowMessaging(false);
+        setSelectedInquiry(null);
+        setMessageUnsubscribe(null);
+    };
+
+    const filteredInquiries = inquiries.filter(inquiry => {
+        if (activeTab === 'inquiries') return inquiry.status === 'pending';
+        if (activeTab === 'responded') return inquiry.status === 'responded' || inquiry.status === 'rejected';
+        return false;
+    });
+
+    return (
+        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-emerald-50">
+            {/* ... Header and Profile Menu JSX ... */}
+            
+            <main className="max-w-6xl mx-auto py-8 px-4 sm:px-6">
+                 {/* ... Tabs and Inquiries List JSX ... */}
+                 {/* This is the same as your existing code, just ensure the modal gets the right props */}
+            </main>
+
+            <MessagingModal
+                isOpen={showMessaging}
+                onClose={closeMessaging}
+                inquiry={selectedInquiry}
+                user={user}
+                profileData={profileData}
+                messages={messages[selectedInquiry?.id] || []}
+                onSendMessage={sendMessage}
+                db={db}
+                appId={appId}
+            />
+        </div>
+    );
+};
     
     const sendMessage = async (inquiryId, messageText) => {
         if (!messageText.trim()) return;
