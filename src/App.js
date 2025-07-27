@@ -296,6 +296,8 @@ const DashboardScreen = ({ user, profileData }) => {
     const [messages, setMessages] = useState({});
     const [newMessage, setNewMessage] = useState('');
 
+    const [messageUnsubscribe, setMessageUnsubscribe] = useState(null);
+
     const removeImage = (type) => {
         if (type === 'front') {
             setFrontImage(null);
@@ -456,16 +458,32 @@ const fetchSentInquiries = () => { // Removed 'async'
 };
 
     
-    const openMessaging = (inquiry) => {
-        setSelectedInquiry(inquiry);
-        setShowMessaging(true);
+    // Inside the DashboardScreen component, replace your existing functions with these
 
-    };
+const openMessaging = (inquiry) => {
+    // If there's an old listener running, clean it up first
+    if (messageUnsubscribe) {
+        messageUnsubscribe();
+    }
     
-    const closeMessaging = () => {
-        setShowMessaging(false);
-        setSelectedInquiry(null);
-    };
+    setSelectedInquiry(inquiry);
+    setShowMessaging(true);
+    
+    // Start a new listener and save its cleanup function
+    const unsubscribeFunc = fetchMessages(inquiry.id);
+    setMessageUnsubscribe(() => unsubscribeFunc);
+};
+
+const closeMessaging = () => {
+    // When the modal closes, call the cleanup function
+    if (messageUnsubscribe) {
+        messageUnsubscribe();
+    }
+    
+    setShowMessaging(false);
+    setSelectedInquiry(null);
+    setMessageUnsubscribe(null); // Reset the state
+};
 
 
 
@@ -1057,6 +1075,7 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
     const [messages, setMessages] = useState({});
     const [newMessage, setNewMessage] = useState('');
     const [unreadCounts, setUnreadCounts] = useState({});
+    const [messageUnsubscribe, setMessageUnsubscribe] = useState(null); // <-- Add this
 
     // Fetch inquiries for this insurance company with real-time updates
     useEffect(() => {
@@ -1156,16 +1175,23 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
     };
 
     // Messaging functions
-    const fetchMessages = (inquiryId) => {
-        const messagesRef = collection(db, `artifacts/${appId}/inquiries/${inquiryId}/messages`);
-        const unsubscribe = onSnapshot(messagesRef, (snapshot) => {
-            const inquiryMessages = [];
-            snapshot.forEach((doc) => {
-                inquiryMessages.push({
-                    id: doc.id,
-                    ...doc.data()
-                });
-            });
+    // Inside the DashboardScreen component, after the state declarations
+
+const fetchMessages = (inquiryId) => {
+    console.log(`Leasing Dashboard: Fetching messages for inquiry ${inquiryId}`);
+    const messagesRef = collection(db, `artifacts/${appId}/inquiries/${inquiryId}/messages`);
+    const q = query(messagesRef, orderBy("timestamp", "asc"));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+        const inquiryMessages = [];
+        snapshot.forEach((doc) => {
+            inquiryMessages.push({ id: doc.id, ...doc.data() });
+        });
+        setMessages(prev => ({ ...prev, [inquiryId]: inquiryMessages }));
+    });
+    
+    return unsubscribe;
+};
             
             // Sort by timestamp
             inquiryMessages.sort((a, b) => {
@@ -1180,10 +1206,10 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
             if (showMessaging && selectedInquiry?.id === inquiryId) {
                 markMessagesAsRead(inquiryId);
             }
-        });
+        };
         
         return unsubscribe;
-    };
+    ;
     
     const sendMessage = async (inquiryId, messageText) => {
         if (!messageText.trim()) return;
@@ -1443,7 +1469,7 @@ const InsuranceCompanyDashboard = ({ user, profileData, handleSignOut }) => {
             />
         </div>
     );
-};
+;
 
 const LoadingSpinner = () => (
     <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-indigo-500"></div>
